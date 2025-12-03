@@ -1,12 +1,5 @@
-// app.js — UI v0.6.6
-// Changes from 0.6.5:
-// - Buzz: guaranteed stop on pointer up (double-stop + raw off fallback), no runaway
-// - Connect button reflects state ("Connected" / "Connect")
-// - Gauge: correct upper-semicircle orientation (no flipped/pointing down); safe radii
-// - Chart, Bars, PID unchanged from 0.6.5
-// - Minor: resilient to tiny first-frame sizes
-
-const UI_VERSION = "0.7.2";
+// app.js – UI v0.9.4 - PART 1 OF 2
+const UI_VERSION = "0.9.4";
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -25,18 +18,13 @@ function safeArc(ctx, cx, cy, r, a0, a1) {
   return true;
 }
 
+/* ======================== LOG REPLAY ======================== */
 let replayTimer = null;
 let replayData = null;
 let replayIndex = 0;
-
-function feedTick(msg){
-  if (msg.ai)  state.ai  = msg.ai;
-  if (msg.ao)  state.ao  = msg.ao;
-  if (msg.do)  state.do  = msg.do;
-  if (msg.tc)  state.tc  = msg.tc;
-  if (msg.pid) state.pid = msg.pid;
-  onTick();  // same rendering path as live
-}
+let replayPaused = false;
+let replayRate = 60;
+let replayMode = null; // null = live, 'paused' = showing full log, 'playing' = animating
 
 function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
@@ -48,12 +36,11 @@ function parseCSV(text){
 
 function makeTickFromRow(cols, row){
   const obj = { type:'tick' };
-  // Heuristic mappings: expects columns like: t, ai0..7, ao0..1, do0..7, tc0..7 (order flexible)
   const ai=[], ao=[], dob=[], tc=[];
   for(let c=0;c<cols.length;c++){
     const name = cols[c].toLowerCase();
     const v = row[c];
-    if (name === 't' || name === 'time' || name === 'timestamp') obj.now = v;
+    if (name === 't' || name === 'time' || name === 'timestamp') obj.t = v;
     else if (name.startsWith('ai')) ai[Number(name.slice(2))] = v;
     else if (name.startsWith('ao')) ao[Number(name.slice(2))] = v;
     else if (name.startsWith('do')) dob[Number(name.slice(2))] = v;
@@ -66,25 +53,231 @@ function makeTickFromRow(cols, row){
   return obj;
 }
 
-function startReplay(cols, rows, rate=60){
-  stopReplay();
+function startReplay(cols, rows){
+  // PAUSE live data
+  if (ws) {
+    try { ws.close(); } catch {}
+    ws = null;
+    connected = false;
+    updateConnectBtn();
+  }
+
   replayData = { cols, rows };
   replayIndex = 0;
-  const stepMs = Math.max(10, 1000/rate);
-  replayTimer = setInterval(()=>{
-    if (!replayData || replayIndex >= replayData.rows.length){
-      stopReplay(); return;
-    }
-    const row = replayData.rows[replayIndex++];
+  replayMode = 'paused';
+  replayPaused = false;
+
+  // Clear existing chart buffers
+  chartBuffers.clear();
+  chartFilters.clear();
+
+  // Load ALL data into charts
+  loadAllReplayDataIntoCharts();
+
+  // Set cursor to first frame for gauges/bars
+  replayIndex = 0;
+  updateGaugesAndBarsFromReplayIndex();
+
+  updateReplayUI();
+}
+
+function loadAllReplayDataIntoCharts(){
+  if (!replayData) return;
+
+  // Feed all data to charts at once
+  for (let i = 0; i < replayData.rows.length; i++) {
+    const row = replayData.rows[i];
     const msg = makeTickFromRow(replayData.cols, row);
+
+    // Only feed to chart buffers, not to state (that would update gauges/bars)
+    for (const p of state.pages){
+      for (const w of p.widgets){
+        if (w.type !== 'chart') continue;
+        const buf = chartBuffers.get(w.id) || [];
+        const t = msg.t || (i * 0.01); // Use message time or fallback
+        const raw = (w.opts.series||[]).map(sel => {
+          if (sel.kind === 'ai') return msg.ai?.[sel.index] ?? 0;
+          if (sel.kind === 'ao') return msg.ao?.[sel.index] ?? 0;
+          if (sel.kind === 'do') return msg.do?.[sel.index] ?? 0;
+          if (sel.kind === 'tc') return msg.tc?.[sel.index] ?? 0;
+          return 0;
+        });
+        buf.push({t, v: raw});
+        chartBuffers.set(w.id, buf);
+      }
+    }
+  }
+}
+
+function updateGaugesAndBarsFromReplayIndex(){
+  if (!replayData || replayIndex >= replayData.rows.length) return;
+
+  const row = replayData.rows[replayIndex];
+  const msg = makeTickFromRow(replayData.cols, row);
+
+  // Update state for gauges and bars only
+  if (msg.ai) state.ai = msg.ai;
+  if (msg.ao) state.ao = msg.ao;
+  if (msg.do) state.do = msg.do;
+  if (msg.tc) state.tc = msg.tc;
+  if (msg.pid) state.pid = msg.pid;
+
+  updateDOButtons();
+}
+
+function playReplay(){
+  if (!replayData) return;
+
+  replayMode = 'playing';
+  replayPaused = false;
+  replayIndex = 0;
+
+  // Clear charts for animated playback
+  chartBuffers.clear();
+  chartFilters.clear();
+
+  updateReplayUI();
+
+  const stepMs = Math.max(10, 1000 / replayRate);
+  replayTimer = setInterval(() => {
+    if (replayIndex >= replayData.rows.length) {
+      pauseReplay();
+      return;
+    }
+
+    const row = replayData.rows[replayIndex];
+    const msg = makeTickFromRow(replayData.cols, row);
+
+    // Feed one frame at a time
     window.dispatchEvent(new CustomEvent('tick', { detail: msg }));
+
+    replayIndex++;
+    updateReplayUI();
   }, stepMs);
 }
 
-function stopReplay(){
-  if (replayTimer){ clearInterval(replayTimer); replayTimer = null; }
+function pauseReplay(){
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
+  replayMode = 'paused';
+  replayPaused = true;
+  updateReplayUI();
+}
+
+function showFullLog(){
+  if (!replayData) return;
+
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
+
+  replayMode = 'paused';
+  replayPaused = false;
+
+  // Reload all data into charts
+  chartBuffers.clear();
+  chartFilters.clear();
+  loadAllReplayDataIntoCharts();
+
+  // Keep current cursor position for gauges/bars
+  updateGaugesAndBarsFromReplayIndex();
+  updateReplayUI();
+}
+
+function closeReplay(){
+  if (replayTimer) {
+    clearInterval(replayTimer);
+    replayTimer = null;
+  }
+
   replayData = null;
   replayIndex = 0;
+  replayMode = null;
+  replayPaused = false;
+
+  // Clear chart buffers
+  chartBuffers.clear();
+  chartFilters.clear();
+
+  // Reconnect to live data
+  connect();
+
+  updateReplayUI();
+}
+
+function seekReplay(index){
+  if (!replayData) return;
+  replayIndex = Math.max(0, Math.min(index, replayData.rows.length - 1));
+  updateGaugesAndBarsFromReplayIndex();
+  updateReplayUI();
+}
+
+function setReplayRate(newRate){
+  replayRate = Math.max(1, Math.min(1000, newRate));
+
+  // If currently playing, restart with new rate
+  if (replayMode === 'playing' && replayTimer) {
+    clearInterval(replayTimer);
+    const stepMs = Math.max(10, 1000 / replayRate);
+    replayTimer = setInterval(() => {
+      if (replayIndex >= replayData.rows.length) {
+        pauseReplay();
+        return;
+      }
+
+      const row = replayData.rows[replayIndex];
+      const msg = makeTickFromRow(replayData.cols, row);
+      window.dispatchEvent(new CustomEvent('tick', { detail: msg }));
+
+      replayIndex++;
+      updateReplayUI();
+    }, stepMs);
+  }
+}
+
+function updateReplayUI(){
+  const controls = document.getElementById('replayControls');
+  if (!controls) return;
+
+  if (replayData && replayMode !== null){
+    controls.style.display = 'flex';
+
+    const progress = document.getElementById('replayProgress');
+    const position = document.getElementById('replayPosition');
+    const playBtn = document.getElementById('replayPlayBtn');
+    const pauseBtn = document.getElementById('replayPauseBtn');
+    const showFullBtn = document.getElementById('replayShowFullBtn');
+    const closeBtn = document.getElementById('replayCloseBtn');
+    const rateInput = document.getElementById('replayRateInput');
+
+    if (progress){
+      progress.max = Math.max(1, replayData.rows.length - 1);
+      progress.value = replayIndex;
+    }
+    if (position){
+      position.textContent = `${replayIndex + 1} / ${replayData.rows.length}`;
+    }
+    if (playBtn){
+      playBtn.disabled = (replayMode === 'playing');
+    }
+    if (pauseBtn){
+      pauseBtn.disabled = (replayMode !== 'playing');
+    }
+    if (showFullBtn){
+      showFullBtn.disabled = false;
+    }
+    if (closeBtn){
+      closeBtn.disabled = false;
+    }
+    if (rateInput){
+      rateInput.value = replayRate;
+    }
+  } else {
+    controls.style.display = 'none';
+  }
 }
 
 function hookLogButtons(){
@@ -95,14 +288,17 @@ function hookLogButtons(){
       inp.type = 'file';
       inp.accept = '.csv,.txt';
       inp.onchange = ()=>{
-        const f = inp.files?.[0]; if (!f) return;
+        const f = inp.files?.[0];
+        if (!f) return;
         const rd = new FileReader();
         rd.onload = ()=>{
           try{
             const {cols, rows} = parseCSV(rd.result);
             if (!cols.length || !rows.length) throw new Error('No data');
-            startReplay(cols, rows, 60);
-          }catch(e){ alert('Load failed: '+e.message); }
+            startReplay(cols, rows);
+          }catch(e){
+            alert('Load failed: '+e.message);
+          }
         };
         rd.readAsText(f);
       };
@@ -111,12 +307,333 @@ function hookLogButtons(){
     openBtn._wired = true;
   }
 
-  const stopBtn = document.getElementById('stopReplayBtn');
-  if (stopBtn && !stopBtn._wired){
-    stopBtn.addEventListener('click', ()=> stopReplay());
-    stopBtn._wired = true;
+  const playBtn = document.getElementById('replayPlayBtn');
+  if (playBtn && !playBtn._wired){
+    playBtn.addEventListener('click', playReplay);
+    playBtn._wired = true;
+  }
+
+  const pauseBtn = document.getElementById('replayPauseBtn');
+  if (pauseBtn && !pauseBtn._wired){
+    pauseBtn.addEventListener('click', pauseReplay);
+    pauseBtn._wired = true;
+  }
+
+  const showFullBtn = document.getElementById('replayShowFullBtn');
+  if (showFullBtn && !showFullBtn._wired){
+    showFullBtn.addEventListener('click', showFullLog);
+    showFullBtn._wired = true;
+  }
+
+  const closeBtn = document.getElementById('replayCloseBtn');
+  if (closeBtn && !closeBtn._wired){
+    closeBtn.addEventListener('click', closeReplay);
+    closeBtn._wired = true;
+  }
+
+  const progress = document.getElementById('replayProgress');
+  if (progress && !progress._wired){
+    progress.addEventListener('input', (e)=>{
+      seekReplay(parseInt(e.target.value));
+    });
+    progress._wired = true;
+  }
+
+  const rateInput = document.getElementById('replayRateInput');
+  if (rateInput && !rateInput._wired){
+    rateInput.addEventListener('change', (e)=>{
+      const newRate = parseFloat(e.target.value) || 60;
+      setReplayRate(newRate);
+    });
+    rateInput._wired = true;
   }
 }
+
+/* ==================== SCRIPT PLAYER ==================== */
+let scriptTimer = null;
+let scriptData = null;
+let scriptIndex = 0;
+let scriptPaused = false;
+let scriptStartTime = 0;
+let scriptLog = []; // Keep a log of executed events
+
+async function loadScript(){
+  try {
+    const response = await fetch('/api/script');
+    const data = await response.json();
+    scriptData = data.events || [];
+    scriptData.sort((a, b) => (a.time || 0) - (b.time || 0));
+    console.log('[Script] Loaded', scriptData.length, 'events:', scriptData);
+    updateScriptUI();
+    return scriptData.length > 0;
+  } catch(e) {
+    console.error('[Script] Failed to load:', e);
+    scriptData = [];
+    updateScriptUI();
+    return false;
+  }
+}
+
+function playScript(){
+  if (!scriptData || scriptData.length === 0) {
+    alert('No script events to play. Edit script to add events.');
+    return;
+  }
+
+  // If paused, resume from current position
+  if (scriptPaused && scriptTimer) {
+    scriptPaused = false;
+    const currentTime = performance.now() / 1000;
+    const eventTime = scriptData[scriptIndex]?.time || 0;
+    scriptStartTime = currentTime - eventTime;
+    console.log('[Script] Resuming from event', scriptIndex);
+    updateScriptUI();
+    runScript();
+    return;
+  }
+
+  // Start from beginning
+  stopScript();
+  scriptIndex = 0;
+  scriptPaused = false;
+  scriptStartTime = performance.now() / 1000;
+  scriptLog = [];
+
+  console.log('[Script] Starting playback of', scriptData.length, 'events');
+  updateScriptUI();
+  runScript();
+}
+
+function runScript(){
+  if (!scriptData || scriptPaused) return;
+
+  const currentTime = (performance.now() / 1000) - scriptStartTime;
+
+  // Execute all events that should have happened by now
+  while (scriptIndex < scriptData.length) {
+    const evt = scriptData[scriptIndex];
+    const eventTime = evt.time || 0;
+
+    if (eventTime > currentTime) break;
+
+    console.log(`[Script] t=${currentTime.toFixed(2)}s: Executing event ${scriptIndex + 1}:`, evt);
+    executeScriptEvent(evt);
+    scriptLog.push({time: currentTime, event: evt, index: scriptIndex});
+    scriptIndex++;
+  }
+
+  updateScriptUI();
+
+  // Check if done
+  if (scriptIndex >= scriptData.length) {
+    console.log('[Script] Playback complete. Executed', scriptLog.length, 'events');
+    stopScript();
+    return;
+  }
+
+  // Schedule next check
+  scriptTimer = setTimeout(runScript, 50); // Check every 50ms
+}
+
+async function executeScriptEvent(evt){
+  try {
+    if (evt.type === 'DO' || !evt.type) { // Default to DO if no type
+      const channel = evt.channel || 0;
+      const state = !!evt.state;
+      const activeHigh = evt.normallyOpen !== false;
+      const duration = evt.duration || 0;
+
+      console.log(`[Script] DO${channel}: ${state ? 'ON' : 'OFF'} (${activeHigh ? 'NO' : 'NC'})${duration > 0 ? `, duration ${duration}s` : ''}`);
+
+      const response = await fetch('/api/do/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          index: channel,
+          state: state,
+          active_high: activeHigh
+        })
+      });
+
+      if (!response.ok) {
+        console.error('[Script] DO set failed:', await response.text());
+        return;
+      }
+
+      console.log(`[Script] ✓ DO${channel} set to ${state}`);
+
+      // If duration > 0, schedule the off event
+      if (duration > 0) {
+        console.log(`[Script] Scheduling DO${channel} OFF in ${duration}s`);
+        setTimeout(async () => {
+          console.log(`[Script] Duration expired: DO${channel} -> OFF`);
+          const offResponse = await fetch('/api/do/set', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              index: channel,
+              state: !state,
+              active_high: activeHigh
+            })
+          });
+          if (offResponse.ok) {
+            console.log(`[Script] ✓ DO${channel} auto-off complete`);
+          } else {
+            console.error('[Script] DO auto-off failed:', await offResponse.text());
+          }
+        }, duration * 1000);
+      }
+
+    } else if (evt.type === 'AO') {
+      const channel = evt.channel || 0;
+      const volts = evt.value || 0;
+
+      console.log(`[Script] AO${channel}: ${volts}V`);
+
+      const response = await fetch('/api/ao/set', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          index: channel,
+          volts: volts
+        })
+      });
+
+      if (!response.ok) {
+        console.error('[Script] AO set failed:', await response.text());
+        return;
+      }
+
+      console.log(`[Script] ✓ AO${channel} set to ${volts}V`);
+    }
+  } catch(e) {
+    console.error('[Script] Event execution failed:', e, 'Event:', evt);
+  }
+}
+
+function pauseScript(){
+  if (!scriptTimer || scriptPaused) return;
+  scriptPaused = true;
+  console.log('[Script] Paused at event', scriptIndex);
+  updateScriptUI();
+}
+
+function stopScript(){
+  if (scriptTimer) {
+    clearTimeout(scriptTimer);
+    scriptTimer = null;
+  }
+  scriptIndex = 0;
+  scriptPaused = false;
+  scriptStartTime = 0;
+  if (scriptLog.length > 0) {
+    console.log('[Script] Stopped. Log:', scriptLog);
+  }
+  updateScriptUI();
+}
+
+function rewindScript(){
+  console.log('[Script] Rewinding to start');
+  stopScript();
+  scriptIndex = 0;
+  scriptLog = [];
+  updateScriptUI();
+}
+
+function updateScriptUI(){
+  const playBtn = document.getElementById('scriptPlayBtn');
+  const pauseBtn = document.getElementById('scriptPauseBtn');
+  const stopBtn = document.getElementById('scriptStopBtn');
+  const rewindBtn = document.getElementById('scriptRewindBtn');
+  const status = document.getElementById('scriptStatus');
+
+  const isPlaying = (scriptTimer !== null && !scriptPaused);
+  const isStopped = (scriptTimer === null && scriptIndex === 0);
+
+  if (playBtn) {
+    playBtn.disabled = isPlaying;
+    playBtn.textContent = (scriptPaused && scriptTimer) ? '▶ Resume' : '▶ Play';
+  }
+  if (pauseBtn) {
+    pauseBtn.disabled = !isPlaying;
+  }
+  if (stopBtn) {
+    stopBtn.disabled = isStopped;
+  }
+  if (rewindBtn) {
+    rewindBtn.disabled = isStopped;
+  }
+
+  if (status && scriptData) {
+    if (isPlaying) {
+      status.textContent = `Playing: ${scriptIndex} / ${scriptData.length}`;
+      status.className = 'badge playing';
+    } else if (scriptPaused && scriptTimer) {
+      status.textContent = `Paused: ${scriptIndex} / ${scriptData.length}`;
+      status.className = 'badge paused';
+    } else if (scriptIndex > 0) {
+      status.textContent = `Stopped: ${scriptIndex} / ${scriptData.length}`;
+      status.className = 'badge stopped';
+    } else if (scriptData.length > 0) {
+      status.textContent = `Ready: ${scriptData.length} events`;
+      status.className = 'badge ready';
+    } else {
+      status.textContent = 'No script loaded';
+      status.className = 'badge';
+    }
+  }
+}
+
+function hookScriptButtons(){
+  const playBtn = document.getElementById('scriptPlayBtn');
+  if (playBtn && !playBtn._wired) {
+    playBtn.addEventListener('click', async () => {
+      await loadScript();
+      playScript();
+    });
+    playBtn._wired = true;
+  }
+
+  const pauseBtn = document.getElementById('scriptPauseBtn');
+  if (pauseBtn && !pauseBtn._wired) {
+    pauseBtn.addEventListener('click', pauseScript);
+    pauseBtn._wired = true;
+  }
+
+  const stopBtn = document.getElementById('scriptStopBtn');
+  if (stopBtn && !stopBtn._wired) {
+    stopBtn.addEventListener('click', stopScript);
+    stopBtn._wired = true;
+  }
+
+  const rewindBtn = document.getElementById('scriptRewindBtn');
+  if (rewindBtn && !rewindBtn._wired) {
+    rewindBtn.addEventListener('click', rewindScript);
+    rewindBtn._wired = true;
+  }
+
+  // Load script data initially
+  loadScript();
+}
+
+// TEST FUNCTION - Call this from browser console to test a single event
+window.testScriptEvent = async function(channel, state) {
+  console.log('[Test] Sending DO command: channel', channel, 'state', state);
+  try {
+    const response = await fetch('/api/do/set', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        index: channel,
+        state: state,
+        active_high: true
+      })
+    });
+    console.log('[Test] Response:', response.ok ? 'OK' : 'FAILED', await response.text());
+  } catch(e) {
+    console.error('[Test] Error:', e);
+  }
+};
 
 /* ------------------------------ state ----------------------------------- */
 let hwReady = false;
@@ -141,14 +658,11 @@ function feedTick(msg){
   onTick();
 }
 
-window.GLOBAL_BUFFER_SPAN = window.GLOBAL_BUFFER_SPAN || 10;  // seconds kept for ALL charts
+window.GLOBAL_BUFFER_SPAN = window.GLOBAL_BUFFER_SPAN || 10;
 
-// If any code dispatches a custom 'tick' event (e.g., log replay), consume it:
 window.addEventListener('tick', (ev)=>{
   if (ev && ev.detail) feedTick(ev.detail);
 });
-
-document.addEventListener('DOMContentLoaded', hookLogButtons);
 
 /* ------------------------ boot / wiring --------------------------------- */
 document.addEventListener('DOMContentLoaded', () => {
@@ -157,6 +671,8 @@ document.addEventListener('DOMContentLoaded', () => {
   showVersions();
   loadConfigCache();
   connect();
+  hookLogButtons();
+  hookScriptButtons();
 });
 
 function wireUI(){
@@ -171,34 +687,6 @@ function wireUI(){
   $('#delPage')?.addEventListener('click', removeActivePage);
   applyInitialsFromConfig();
   document.querySelectorAll('[data-add]').forEach(btn => btn.addEventListener('click', ()=>addWidget(btn.dataset.add)));
-}
-
-function wireDoBuzzMomentary(btn) {
-  const idx = +btn.dataset.index;                // required: data-index="0..7"
-  const hz  = +(btn.dataset.buzzhz || 10);
-  const ah  = (btn.dataset.activeHigh !== 'false');
-
-  let pressed = false;
-  const start = () => {
-    if (pressed) return;
-    pressed = true;
-    fetch('/api/do/buzz/start', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ index: idx, hz, active_high: ah })
-    });
-  };
-  const stop = () => {
-    if (!pressed) return;
-    pressed = false;
-    fetch(`/api/do/buzz/stop?index=${idx}`, { method: 'POST' });
-  };
-
-  btn.addEventListener('mousedown', start);
-  btn.addEventListener('touchstart', start, {passive:true});
-
-  ['mouseup','mouseleave','touchend','touchcancel','blur']
-    .forEach(ev => btn.addEventListener(ev, stop));
 }
 
 async function showVersions(){
@@ -256,8 +744,6 @@ function connect(){
 async function applyInitialsFromConfig(){
   try{
     const cfg = await (await fetch('/api/config')).json();
-
-    // Analog outputs: startup -> min -> 0.0
     const aos = cfg.ao || cfg.analogOutputs || [];
     for(let i=0;i<aos.length;i++){
       const item = aos[i] || {};
@@ -270,16 +756,12 @@ async function applyInitialsFromConfig(){
         body: JSON.stringify({ index:i, volts: Number(v)||0 })
       }).catch(()=>{});
     }
-
-    // Digital outputs: set to LOGICALLY INACTIVE (respect active_high / NO/NC)
     const dos = cfg.do || cfg.digitalOutputs || [];
     for(let i=0;i<dos.length;i++){
       const d = dos[i] || {};
-      // Prefer explicit field if present, else map NO/NC to active_high
       const activeHigh =
         (typeof d.active_high === 'boolean') ? d.active_high :
         (d.mode === 'NC' || d.nc === true)   ? false : true;
-
       await fetch('/api/do/set', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -1063,7 +1545,19 @@ function mountAOSlider(w, body){
 }
 
 /* ------------------------ tick / read / drag ---------------------------- */
-function onTick(){ updateChartBuffers(); updateDOButtons(); }
+function onTick(){
+  if (replayMode !== null) {
+    // In replay mode, only update charts during playback
+    if (replayMode === 'playing') {
+      updateChartBuffers();
+    }
+    // Don't update gauges/bars here - they're controlled by seekReplay
+  } else {
+    // Live mode - update everything normally
+    updateChartBuffers();
+    updateDOButtons();
+  }
+}
 
 function readSelection(sel){
   if(!sel) return 0;
@@ -1172,7 +1666,226 @@ function openJsonEditor(title,url){
     showModal(el('div',{},[el('h2',{},title), ta, el('div',{style:'margin-top:8px'},save)]));
   });
 }
-function openScriptEditor(){ openJsonEditor('Script','/api/script'); }
+
+
+/* ==================== SCRIPT EDITOR (Graphical) ==================== */
+async function openScriptEditor(){
+  const script = await (await fetch('/api/script')).json();
+  const events = script.events || [];
+
+  const root = el('div', {});
+  const title = el('h2', {}, 'Script Editor');
+
+  const table = el('table', {className: 'form script-table'});
+  const thead = el('thead', {}, el('tr', {}, [
+    el('th', {}, 'Time (s)'),
+    el('th', {}, 'Duration (s)'),
+    el('th', {}, 'Type'),
+    el('th', {}, 'Channel'),
+    el('th', {}, 'Value/State'),
+    el('th', {}, 'NO/NC'),
+    el('th', {}, 'Actions')
+  ]));
+  const tbody = el('tbody', {});
+
+  function renderEvents(){
+    tbody.innerHTML = '';
+    events.forEach((evt, idx) => {
+      const timeInput = el('input', {
+        type: 'number',
+        value: evt.time || 0,
+        step: 0.1,
+        min: 0,
+        style: 'width:80px'
+      });
+      timeInput.oninput = () => evt.time = parseFloat(timeInput.value) || 0;
+
+      const durationInput = el('input', {
+        type: 'number',
+        value: evt.duration || 0,
+        step: 0.1,
+        min: 0,
+        style: 'width:80px'
+      });
+      durationInput.oninput = () => evt.duration = parseFloat(durationInput.value) || 0;
+
+      const typeSelect = el('select', {style: 'width:80px'}, [
+        el('option', {value: 'DO'}, 'DO'),
+        el('option', {value: 'AO'}, 'AO')
+      ]);
+      typeSelect.value = evt.type || 'DO';
+      typeSelect.onchange = () => {
+        evt.type = typeSelect.value;
+        renderEvents(); // Re-render to show appropriate controls
+      };
+
+      const channelInput = el('input', {
+        type: 'number',
+        value: evt.channel || 0,
+        min: 0,
+        max: (evt.type === 'AO' ? 1 : 7),
+        step: 1,
+        style: 'width:60px'
+      });
+      channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
+
+      let valueControl;
+      let noNcControl = el('span', {}, '—');
+
+      if (evt.type === 'DO') {
+        // Digital output: checkbox for state
+        const stateCheck = el('input', {
+          type: 'checkbox',
+          checked: !!evt.state
+        });
+        stateCheck.onchange = () => evt.state = stateCheck.checked;
+        valueControl = el('label', {style: 'display:flex;align-items:center;gap:4px'}, [
+          stateCheck,
+          el('span', {}, 'ON')
+        ]);
+
+        // NO/NC radio buttons
+        const noRadio = el('input', {
+          type: 'radio',
+          name: `nonc_${idx}`,
+          value: 'NO',
+          checked: evt.normallyOpen !== false
+        });
+        const ncRadio = el('input', {
+          type: 'radio',
+          name: `nonc_${idx}`,
+          value: 'NC',
+          checked: evt.normallyOpen === false
+        });
+        noRadio.onchange = () => evt.normallyOpen = true;
+        ncRadio.onchange = () => evt.normallyOpen = false;
+
+        noNcControl = el('div', {style: 'display:flex;gap:8px;align-items:center'}, [
+          el('label', {style: 'display:flex;gap:4px'}, [noRadio, 'NO']),
+          el('label', {style: 'display:flex;gap:4px'}, [ncRadio, 'NC'])
+        ]);
+      } else {
+        // Analog output: voltage input
+        const voltInput = el('input', {
+          type: 'number',
+          value: evt.value || 0,
+          step: 0.01,
+          min: 0,
+          max: 10,
+          style: 'width:80px'
+        });
+        voltInput.oninput = () => evt.value = parseFloat(voltInput.value) || 0;
+        valueControl = el('div', {style: 'display:flex;align-items:center;gap:4px'}, [
+          voltInput,
+          el('span', {}, 'V')
+        ]);
+      }
+
+      const deleteBtn = el('button', {
+        type: 'button',
+        className: 'btn danger',
+        onclick: () => {
+          events.splice(idx, 1);
+          renderEvents();
+        }
+      }, '×');
+
+      const upBtn = el('button', {
+        type: 'button',
+        className: 'btn',
+        onclick: () => {
+          if (idx > 0) {
+            [events[idx], events[idx-1]] = [events[idx-1], events[idx]];
+            renderEvents();
+          }
+        },
+        disabled: idx === 0
+      }, '↑');
+
+      const downBtn = el('button', {
+        type: 'button',
+        className: 'btn',
+        onclick: () => {
+          if (idx < events.length - 1) {
+            [events[idx], events[idx+1]] = [events[idx+1], events[idx]];
+            renderEvents();
+          }
+        },
+        disabled: idx === events.length - 1
+      }, '↓');
+
+      const tr = el('tr', {}, [
+        el('td', {}, timeInput),
+        el('td', {}, durationInput),
+        el('td', {}, typeSelect),
+        el('td', {}, channelInput),
+        el('td', {}, valueControl),
+        el('td', {}, noNcControl),
+        el('td', {style: 'display:flex;gap:4px'}, [upBtn, downBtn, deleteBtn])
+      ]);
+
+      tbody.append(tr);
+    });
+  }
+
+  renderEvents();
+  table.append(thead, tbody);
+
+  const addBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      events.push({
+        time: 0,
+        duration: 0,
+        type: 'DO',
+        channel: 0,
+        state: false,
+        normallyOpen: true
+      });
+      renderEvents();
+    }
+  }, '+ Add Event');
+
+  const sortBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      events.sort((a, b) => (a.time || 0) - (b.time || 0));
+      renderEvents();
+    },
+    style: 'margin-left:8px'
+  }, 'Sort by Time');
+
+  const saveBtn = el('button', {
+    className: 'btn',
+    onclick: async () => {
+      try {
+        await fetch('/api/script', {
+          method: 'PUT',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({events})
+        });
+        alert('Script saved successfully');
+      } catch(e) {
+        alert('Save failed: ' + e.message);
+      }
+    },
+    style: 'margin-left:8px'
+  }, 'Save');
+
+  root.append(
+    title,
+    el('div', {style: 'margin:12px 0'}, [
+      el('p', {}, 'Define timed events for automated control. Time is in seconds from script start.'),
+      el('p', {style: 'font-size:12px;color:var(--muted)'},
+        'Duration: How long the output stays in this state (0 = instantaneous toggle)')
+    ]),
+    table,
+    el('div', {style: 'margin-top:12px;display:flex;gap:8px'}, [addBtn, sortBtn, saveBtn])
+  );
+
+  showModal(root);
+}
+
 
 /* -------- structured config / pid forms (resizable modal) --------------- */
 async function openConfigForm(){
