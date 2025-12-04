@@ -159,21 +159,21 @@
       "offset": 0.0
     },
     {
-      "include": true,
+      "include": false,
       "ch": 1,
       "name": "Mid High",
       "type": "T",
       "offset": 0.0
     },
     {
-      "include": true,
+      "include": false,
       "ch": 2,
       "name": "Mid Low",
       "type": "T",
       "offset": 0.0
     },
     {
-      "include": true,
+      "include": false,
       "ch": 3,
       "name": "Bottom",
       "type": "T",

@@ -107,6 +107,9 @@ class MCCBridge:
 
         # Avoid re-writing TC type every sample
         self._tc_type_set_cache = {}  # ch -> "K"/"J"/...
+        # AUTO-DETECTION: Track if we've detected TCs yet (runtime only, not saved)
+        self._tc_detected = False
+        self._tc_runtime_include = {}  # ch -> bool (runtime override)
 
     # ---------------- Lifecycle ----------------
     def open(self, cfg: AppConfig):
@@ -270,47 +273,100 @@ class MCCBridge:
                     self._warned_mcc_tctype = True
 
     def read_tc_all(self) -> List[float]:
-        """Return enabled TC channels (ordered by config.thermocouples). Missing driver -> []."""
+        """Return enabled TC channels (ordered by config.thermocouples).
+        Auto-detects working channels on first call. Missing driver -> []."""
         if self.cfg is None:
             return []
-        # Build lists from config
-        enabled: List[int] = []
-        types: List[str] = []
-        for rec in self.cfg.thermocouples:
-            if rec.include:
-                # NOTE: AppConfig uses 'ch' field, not 'channel'
-                enabled.append(int(rec.ch))
-                types.append(rec.type or "K")
 
-        if not enabled:
+        # AUTO-DETECTION: On first call, probe all channels to see which are present
+        if not self._tc_detected:
+            self._tc_detected = True
+            print("[MCCBridge] Auto-detecting thermocouples...")
+
+            # Probe EVERY configured channel to see if it actually works
+            for rec in self.cfg.thermocouples:
+                ch = int(rec.ch)
+                detected = False
+
+                # Try ULDAQ path
+                if self._etc_uldaq_ok and self._etc_uldaq_tdev is not None:
+                    try:
+                        self._set_tc_type_if_needed(ch, rec.type or "K")
+                        val = self._etc_uldaq_tdev.t_in(ch, TempScale.CELSIUS, TInFlags.DEFAULT)
+                        # Check if we got a reasonable value (not open circuit error)
+                        if -200 < val < 2000:  # Reasonable TC range
+                            detected = True
+                    except Exception:
+                        # Channel not present - this is expected for missing TCs
+                        detected = False
+
+                # Try mcculw fallback
+                elif HAVE_MCCULW and self._etc_mcc_board is not None:
+                    try:
+                        self._set_tc_type_if_needed(ch, rec.type or "K")
+                        val = ul.t_in(self._etc_mcc_board, ch, MCCTempScale.CELSIUS)
+                        # Check if we got a reasonable value
+                        if -200 < val < 2000:  # Reasonable TC range
+                            detected = True
+                    except Exception:
+                        # Channel not present - this is expected for missing TCs
+                        detected = False
+
+                # Always store detection result (overrides config during runtime)
+                self._tc_runtime_include[ch] = detected
+
+                config_status = "enabled in config" if rec.include else "disabled in config"
+                if detected:
+                    print(f"[MCCBridge] ✓ TC channel {ch} ({rec.name}) detected and will be enabled ({config_status})")
+                else:
+                    print(f"[MCCBridge] ✗ TC channel {ch} ({rec.name}) NOT detected, will be skipped ({config_status})")
+
+            enabled = [ch for ch, en in self._tc_runtime_include.items() if en]
+            print(f"[MCCBridge] TC detection complete. Active channels: {enabled}")
+
+        # Build lists of ONLY detected channels (ignores config include setting)
+        enabled_channels: List[int] = []
+        types: List[str] = []
+        names: List[str] = []
+
+        for rec in self.cfg.thermocouples:
+            ch = int(rec.ch)
+            # Only use channels that were actually detected
+            if self._tc_runtime_include.get(ch, False):
+                enabled_channels.append(ch)
+                types.append(rec.type or "K")
+                names.append(rec.name or f"TC{ch}")
+
+        if not enabled_channels:
             return []
 
-        # ULDAQ path
+        # ULDAQ path - only read detected channels
         if self._etc_uldaq_ok and self._etc_uldaq_tdev is not None:
             out: List[float] = []
-            for i, ch in enumerate(enabled):
-                # Set type once if we can
-                self._set_tc_type_if_needed(ch, types[i] if i < len(types) else "K")
+            for i, ch in enumerate(enabled_channels):
+                tc_type = types[i] if i < len(types) else "K"
+                self._set_tc_type_if_needed(ch, tc_type)
                 try:
                     val = self._etc_uldaq_tdev.t_in(
                         int(ch), TempScale.CELSIUS, TInFlags.DEFAULT
                     )
                     out.append(float(val))
                 except Exception as e:
-                    print(f"[MCCBridge] ULDAQ t_in ch{ch} failed: {e}")
+                    print(f"[MCCBridge] ULDAQ t_in ch{ch} ({names[i]}) unexpected error: {e}")
                     out.append(float("nan"))
             return out
 
-        # mcculw fallback (cbTIn)
+        # mcculw fallback (cbTIn) - only read detected channels
         if HAVE_MCCULW and self._etc_mcc_board is not None:
             out = []
-            for i, ch in enumerate(enabled):
-                self._set_tc_type_if_needed(ch, types[i] if i < len(types) else "K")
+            for i, ch in enumerate(enabled_channels):
+                tc_type = types[i] if i < len(types) else "K"
+                self._set_tc_type_if_needed(ch, tc_type)
                 try:
                     val = ul.t_in(self._etc_mcc_board, int(ch), MCCTempScale.CELSIUS)
                     out.append(float(val))
                 except Exception as e:
-                    print(f"[MCCBridge] MCC t_in ch{ch} failed: {e}")
+                    print(f"[MCCBridge] MCC t_in ch{ch} ({names[i]}) unexpected error: {e}")
                     out.append(float("nan"))
             return out
 

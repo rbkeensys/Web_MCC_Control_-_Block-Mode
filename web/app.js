@@ -900,34 +900,21 @@ const chartBuffers=new Map();
 const chartFilters=new Map();
 const chartCursor=new Map(); // w.id -> {x: number|null, mode:'follow'|'current', ctxEl:HTMLElement|null}
 
+/* ==================== ENHANCED CHART WITH GRID ==================== */
+// Replace your mountChart function with this enhanced version
+
 function mountChart(w, body){
   const legend=el('div',{className:'legend'}); body.append(legend);
   const canvas=el('canvas'); body.append(canvas);
   const ctx=canvas.getContext('2d');
 
-  // Per-chart view: span & pause without affecting acquisition buffer
   w.view = w.view || { span: (window.GLOBAL_BUFFER_SPAN || 10), paused: false, tFreeze: 0 };
+  w.opts.yGridLines = w.opts.yGridLines || 5; // Default 5 horizontal lines
 
-  function applyViewZoom(mult){
-    const base = (w.view.span || (window.GLOBAL_BUFFER_SPAN || 10));
-    w.view.span = Math.max(0.1, Math.min(3600, base * mult));
-    // zoom => pause & freeze view to current end
-    const buf = chartBuffers.get(w.id) || [];
-    w.view.paused = true;
-    w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
-  }
-  function resetFullView(){
-    w.view.span = (window.GLOBAL_BUFFER_SPAN || 10);
-    w.view.paused = false;
-  }
-
-  // Mouse wheel: zoom this chart’s view
   canvas.addEventListener('wheel', (ev)=>{
     ev.preventDefault();
-    // Shift+wheel changes the GLOBAL buffer span for ALL charts
     if (ev.shiftKey){
       window.GLOBAL_BUFFER_SPAN = Math.max(1, Math.min(3600, (window.GLOBAL_BUFFER_SPAN || 10) * ((ev.deltaY>0)?1.15:1/1.15)));
-      // If a chart is not paused, follow the new full span
       for (const p of state.pages){
         for (const w2 of p.widgets){
           if (w2.type==='chart'){
@@ -937,12 +924,18 @@ function mountChart(w, body){
         }
       }
     } else {
-      applyViewZoom(ev.deltaY > 0 ? 1.15 : 1/1.15);
+      const base = (w.view.span || (window.GLOBAL_BUFFER_SPAN || 10));
+      w.view.span = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
+      const buf = chartBuffers.get(w.id) || [];
+      w.view.paused = true;
+      w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
     }
   }, {passive:false});
 
-  // Double-click: reset this chart to full view (live)
-  canvas.addEventListener('dblclick', resetFullView);
+  canvas.addEventListener('dblclick', ()=>{
+    w.view.span = (window.GLOBAL_BUFFER_SPAN || 10);
+    w.view.paused = false;
+  });
 
   chartCursor.set(w.id, {x:null, mode:w.opts.cursorMode||'follow', ctxEl:null});
 
@@ -964,49 +957,13 @@ function mountChart(w, body){
     cur.ctxEl=menu; chartCursor.set(w.id,cur);
   });
 
-  // Zoom helpers
-    function applySpan(mult){
-      const cur = Number(w.opts.span) || 10;
-      w.opts.span = Math.max(0.1, Math.min(3600, cur * mult));
-    }
-    function resetSpan(){
-      // Full view = show all in buffer; fallback to 10s
-      const hist = w._histTimes || []; // if you track timestamps per chart
-      if (hist.length >= 2) w.opts.span = (hist[hist.length-1] - hist[0]);
-      else w.opts.span = 10;
-    }
-
-    // Mouse wheel zoom
-    canvas.addEventListener('wheel', (ev)=>{
-      ev.preventDefault();
-      const mult = (ev.deltaY > 0) ? 1.15 : (1/1.15);
-      applySpan(mult);
-    }, {passive:false});
-
-    // Double-click resets
-    canvas.addEventListener('dblclick', (ev)=> resetSpan());
-
-    // Optional: header buttons (if you have a header el for this chart)
-    const hdr = body.querySelector('.w-head'); // or however you reference it
-    if (hdr && !hdr.querySelector('.zoomBtns')){
-      const box = el('span',{className:'zoomBtns', style:'margin-left:8px;'});
-      const bIn  = el('button',{type:'button'},'+');
-      const bOut = el('button',{type:'button'},'–');
-      const bFull= el('button',{type:'button'},'Full');
-      bIn.onclick  = ()=> applySpan(0.8);
-      bOut.onclick = ()=> applySpan(1.25);
-      bFull.onclick= ()=> resetSpan();
-      box.append(bIn,bOut,bFull);
-      hdr.appendChild(box);
-    }
-
   function draw(){
     if (w.opts.paused){ requestAnimationFrame(draw); return; }
 
     const buf=chartBuffers.get(w.id)||[];
     const W=canvas.clientWidth, H=canvas.clientHeight;
     canvas.width=W; canvas.height=H;
-    const plotL=40, plotR=W-10, plotT=10, plotB=H-30;
+    const plotL=60, plotR=W-10, plotT=10, plotB=H-30;
 
     ctx.clearRect(0,0,W,H);
     ctx.strokeStyle='#3b425e'; ctx.lineWidth=1;
@@ -1036,14 +993,45 @@ function mountChart(w, body){
       const yscale = (plotB - plotT)/(ymax - ymin);
       const xscale = (plotR - plotL)/dt;
 
-      // X grid: 10 divisions based on current VIEW span
-      const divs = 10; const gridDt = viewSpan/divs;
+      // X grid (vertical lines for time)
+      const xDivs = 10; const gridDt = viewSpan/xDivs;
       const firstGrid = Math.ceil(t0 / gridDt)*gridDt;
       ctx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#2a2f44').trim();
       ctx.lineWidth=1;
       for (let gx = firstGrid; gx <= t1 + 1e-6; gx += gridDt){
         const x = plotL + (gx - t0) * xscale;
         ctx.beginPath(); ctx.moveTo(x, plotT); ctx.lineTo(x, plotB); ctx.stroke();
+      }
+
+      // Y grid (horizontal lines with labels)
+      const yGridLines = Math.max(2, Math.min(20, w.opts.yGridLines || 5));
+      ctx.strokeStyle=(getComputedStyle(document.documentElement).getPropertyValue('--grid') || '#2a2f44').trim();
+      ctx.lineWidth=1;
+      ctx.fillStyle='#7a8199';
+      ctx.font='11px system-ui';
+      ctx.textAlign='right';
+      ctx.textBaseline='middle';
+
+      for (let i = 0; i <= yGridLines; i++) {
+        const frac = i / yGridLines;
+        const y = plotB - frac * (plotB - plotT);
+        const val = ymin + frac * (ymax - ymin);
+
+        // Draw horizontal line
+        ctx.beginPath();
+        ctx.moveTo(plotL, y);
+        ctx.lineTo(plotR, y);
+        ctx.stroke();
+
+        // Draw value label on the left axis
+        ctx.fillText(val.toFixed(2), plotL - 5, y);
+
+        // Draw value label in the middle of the plot
+        ctx.textAlign='center';
+        ctx.fillStyle='rgba(122, 129, 153, 0.6)';
+        ctx.fillText(val.toFixed(2), (plotL + plotR) / 2, y - 2);
+        ctx.fillStyle='#7a8199';
+        ctx.textAlign='right';
       }
 
       // Draw series
@@ -1078,6 +1066,41 @@ function mountChart(w, body){
     requestAnimationFrame(draw);
   }
   draw();
+}
+
+// Update widgetOptions to add Y Grid control
+function widgetOptions(w){
+  const opts=[];
+  if (w.type==='chart'||w.type==='gauge'||w.type==='bars'){
+    const sel=el('select',{value:w.opts.scale},[
+      el('option',{value:'auto'}, 'Auto'),
+      el('option',{value:'manual'}, 'Manual')
+    ]);
+    sel.onchange=e=>{ w.opts.scale=e.target.value; };
+    const min=el('input',{type:'number',value:w.opts.min, step:'any', style:'width:90px'});
+    const max=el('input',{type:'number',value:w.opts.max, step:'any', style:'width:90px'});
+    const sync=()=>{ w.opts.min=parseFloat(min.value)||0; w.opts.max=parseFloat(max.value)||0; };
+    min.oninput=sync; max.oninput=sync;
+    opts.push(el('span',{},'Scale:'), sel, el('span',{},'Min:'), min, el('span',{},'Max:'), max);
+  }
+  if (w.type==='chart'){
+    const span=el('input',{type:'number', value:w.opts.span, min:1, step:1, style:'width:70px'});
+    span.oninput=()=>{ w.opts.span=parseFloat(span.value)||10; };
+    const filt=el('input',{type:'number', value:w.opts.filterHz||0, min:0, step:'any', style:'width:80px'});
+    filt.oninput =()=>{ w.opts.filterHz=parseFloat(filt.value)||0; };
+    const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
+    yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
+    const pause=el('button',{className:'btn', onclick:()=>{ w.opts.paused=!w.opts.paused; pause.textContent=w.opts.paused?'Resume':'Pause'; }},
+      w.opts.paused?'Resume':'Pause'
+    );
+    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause);
+  }
+  if (w.type==='bars'){
+    const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
+    yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
+    opts.push(el('span',{},'Y Grid:'), yGrid);
+  }
+  return opts;
 }
 
 function buildChartContextMenu(w, canvas, legend){
@@ -1286,16 +1309,21 @@ function mountGauge(w, body){
 }
 
 /* -------------------------------- bars ---------------------------------- */
+/* ==================== ENHANCED BARS WITH GRID LABELS ==================== */
+// Replace your mountBars function with this
+
 function mountBars(w, body){
   const canvas = el('canvas'); body.append(canvas);
   const ctx = canvas.getContext('2d');
+
+  w.opts.yGridLines = w.opts.yGridLines || 5; // Default 5 horizontal lines
 
   function draw(){
     const W = canvas.clientWidth, H = canvas.clientHeight;
     canvas.width = W; canvas.height = H;
     ctx.clearRect(0, 0, W, H);
 
-    const plotL = 30, plotR = W - 10, plotT = 10, plotB = H - 30;
+    const plotL = 60, plotR = W - 10, plotT = 10, plotB = H - 30;
     ctx.strokeStyle = '#3b425e';
     ctx.lineWidth = 1;
     ctx.strokeRect(plotL, plotT, plotR - plotL, plotB - plotT);
@@ -1313,16 +1341,36 @@ function mountBars(w, body){
     }
     const span = hi - lo || 1;
 
-    // Y grid
+    // Y grid with labels
+    const yGridLines = Math.max(2, Math.min(20, w.opts.yGridLines || 5));
     ctx.strokeStyle = (getComputedStyle(document.documentElement)
                        .getPropertyValue('--grid') || '#2a2f44').trim();
     ctx.lineWidth = 1;
-    for (let i = 0; i <= 5; i++) {
-      const y = plotB - (i / 5) * (plotB - plotT);
+    ctx.fillStyle='#7a8199';
+    ctx.font='11px system-ui';
+    ctx.textAlign='right';
+    ctx.textBaseline='middle';
+
+    for (let i = 0; i <= yGridLines; i++) {
+      const frac = i / yGridLines;
+      const y = plotB - frac * (plotB - plotT);
+      const val = lo + frac * (hi - lo);
+
+      // Draw horizontal line
       ctx.beginPath();
       ctx.moveTo(plotL, y);
       ctx.lineTo(plotR, y);
       ctx.stroke();
+
+      // Draw value label on the left axis
+      ctx.fillText(val.toFixed(2), plotL - 5, y);
+
+      // Draw value label in the middle
+      ctx.textAlign='center';
+      ctx.fillStyle='rgba(122, 129, 153, 0.6)';
+      ctx.fillText(val.toFixed(2), (plotL + plotR) / 2, y - 2);
+      ctx.fillStyle='#7a8199';
+      ctx.textAlign='right';
     }
 
     const series = w.opts.series || [];
@@ -1343,11 +1391,21 @@ function mountBars(w, body){
       ctx.fillStyle = colorFor(idx);
       ctx.fillRect(x - barW / 2, y, barW, h);
 
-      const label = sel.name || '';
+      // Draw series label at bottom
+      const label = sel.name || labelFor(sel);
       if (label) {
         ctx.fillStyle = '#a8b3cf';
         ctx.textAlign = 'center';
         ctx.fillText(label, x, plotB + 2);
+      }
+
+      // Draw value on top of bar
+      if (Number.isFinite(v)) {
+        ctx.fillStyle = '#e6e6e6';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(v.toFixed(2), x, y - 2);
+        ctx.textBaseline = 'top';
       }
     });
 
@@ -1355,6 +1413,7 @@ function mountBars(w, body){
   }
   draw();
 }
+
 /* -------------------------------- DO ------------------------------------ */
 function logicalActive(bit,activeHigh){ return activeHigh ? !!bit : !bit; }
 
@@ -1668,13 +1727,188 @@ function openJsonEditor(title,url){
 }
 
 
-/* ==================== SCRIPT EDITOR (Graphical) ==================== */
+/* ==================== EDITORS WITH LOAD FROM FILE ==================== */
+// Replace your openConfigForm, openPidForm, and openScriptEditor functions
+
+async function openConfigForm(){
+  const cfg=await (await fetch('/api/config')).json();
+  configCache = cfg;
+  const root=el('div',{});
+
+  // Add Load from File button
+  const loadBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      const inp = el('input', {type: 'file', accept: '.json'});
+      inp.onchange = async () => {
+        const f = inp.files?.[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const loaded = JSON.parse(text);
+          // Reload the form with loaded data
+          Object.assign(cfg, loaded);
+          root.innerHTML = '';
+          // Rebuild form (simplified - you'd call this recursively)
+          alert('Config loaded! Close and reopen to see changes, or click Save to apply.');
+        } catch(e) {
+          alert('Failed to load config: ' + e.message);
+        }
+      };
+      inp.click();
+    }
+  }, '📁 Load from File');
+
+  const boards=fieldset('Boards', tableForm([
+    ['E-1608 boardNum',     inputNum(cfg.board1608,'boardNum',0)],
+    ['E-1608 sampleRateHz', inputNum(cfg.board1608,'sampleRateHz',1)],
+    ['E-1608 blockSize',    inputNum(cfg.board1608,'blockSize',1)],
+    ['E-TC boardNum',       inputNum(cfg.boardetc,'boardNum',0)],
+    ['E-TC sampleRateHz',   inputNum(cfg.boardetc,'sampleRateHz',1)],
+    ['E-TC blockSize',      inputNum(cfg.boardetc,'blockSize',1)]
+  ]));
+
+  const analogRows=(cfg.analogs||[]).map((a,i)=>[
+    `AI${i} name`, inputText(a,'name'),
+    `slope`,      inputNum(a,'slope',0.000001),
+    `offset`,     inputNum(a,'offset',0.000001),
+    `cutoffHz`,   inputNum(a,'cutoffHz',0.1),
+    `units`,      inputText(a,'units'),
+    `include`,    inputChk(a,'include')
+  ]);
+  const analogs=fieldset('Analogs (server scales Y = m·X + b)', tableFormRows(analogRows));
+
+  (cfg.digitalOutputs||[]).forEach(d=>{ if(!d.mode){ d.mode = d.momentary ? 'momentary' : 'toggle'; } });
+  const DO_MODES=['toggle','momentary','buzz'];
+  const doRows=(cfg.digitalOutputs||[]).map((d,i)=>[
+    `DO${i} name`, inputText(d,'name'),
+    `mode`,        selectEnum(DO_MODES,d.mode||'toggle',v=>{ d.mode=v; d.momentary = (v==='momentary'); }),
+    `normallyOpen`,inputChk(d,'normallyOpen'),
+    `actuationTime (s, toggle only)`, inputNum(d,'actuationTime',0.1),
+    `include`,     inputChk(d,'include')
+  ]);
+  const dig=fieldset('Digital Outputs', tableFormRows(doRows));
+
+  const aoRows=(cfg.analogOutputs||[]).map((a,i)=>[
+    `AO${i} name`, inputText(a,'name'),
+    `minV`,        inputNum(a,'minV',0.001),
+    `maxV`,        inputNum(a,'maxV',0.001),
+    `startupV`,    inputNum(a,'startupV',0.001),
+    `include`,     inputChk(a,'include')
+  ]);
+  const aos=fieldset('Analog Outputs (0–10 V)', tableFormRows(aoRows));
+
+  const tcRows=(cfg.thermocouples||[]).map((t,i)=>[
+    `TC${i} include`, inputChk(t,'include'),
+    `ch`,             inputNum(t,'ch',1),
+    `name`,           inputText(t,'name'),
+    `type`,           selectEnum(['K','J','T','E','R','S','B','N','C'], t.type||'K', v=>t.type=v),
+    `offset`,         inputNum(t,'offset',0.001)
+  ]);
+  const tcs=fieldset('Thermocouples', tableFormRows(tcRows));
+
+  const save=el('button',{className:'btn',onclick:async()=>{
+    try{ await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)}); alert('Saved'); }
+    catch(e){ alert('Save failed: '+e.message); }
+  }},'Save');
+
+  root.append(
+    el('div', {style: 'display:flex;gap:8px;margin-bottom:12px'}, [loadBtn]),
+    boards,analogs,dig,aos,tcs,
+    el('div',{style:'margin-top:8px'}, save)
+  );
+  showModal(root, ()=>{ renderPage(); });
+}
+
+async function openPidForm(){
+  const pid=await (await fetch('/api/pid')).json();
+
+  const root = el('div', {});
+
+  // Add Load from File button
+  const loadBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      const inp = el('input', {type: 'file', accept: '.json'});
+      inp.onchange = async () => {
+        const f = inp.files?.[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const loaded = JSON.parse(text);
+          Object.assign(pid, loaded);
+          alert('PID config loaded! Close and reopen to see changes, or click Save to apply.');
+        } catch(e) {
+          alert('Failed to load PID: ' + e.message);
+        }
+      };
+      inp.click();
+    }
+  }, '📁 Load from File');
+
+  const rows=(pid.loops||[]).map((L,idx)=>[
+    `Loop ${idx} enabled`, inputChk(L,'enabled'),
+    `name`,  inputText(L,'name'),
+    `kind`,  selectEnum(['analog','digital','tc','calc'], L.kind||'analog', v=>L.kind=v),
+    `src`,   selectEnum(['ai','tc','calc'], L.src||'ai', v=>L.src=v),
+    `ai_ch`, inputNum(L,'ai_ch',1),
+    `out_ch`,inputNum(L,'out_ch',1),
+    `target`,inputNum(L,'target',0.0001),
+    `kp`,    inputNum(L,'kp',0.0001),
+    `ki`,    inputNum(L,'ki',0.0001),
+    `kd`,    inputNum(L,'kd',0.0001),
+    `out_min`,inputNum(L,'out_min',0.0001),
+    `out_max`,inputNum(L,'out_max',0.0001),
+    `err_min`,inputNum(L,'err_min',0.0001),
+    `err_max`,inputNum(L,'err_max',0.0001),
+    `i_min`,  inputNum(L,'i_min',0.0001),
+    `i_max`,  inputNum(L,'i_max',0.0001)
+  ]);
+  const fs=fieldset('PID Loops', tableFormRows(rows));
+  const save=el('button',{className:'btn',onclick:async()=>{
+    try{ await fetch('/api/pid',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(pid)}); alert('Saved'); }
+    catch(e){ alert('Save failed: '+e.message); }
+  }},'Save');
+
+  root.append(
+    el('div', {style: 'display:flex;gap:8px;margin-bottom:12px'}, [loadBtn]),
+    fs,
+    el('div',{style:'margin-top:8px'}, save)
+  );
+  showModal(root, ()=>{ renderPage(); });
+}
+
 async function openScriptEditor(){
   const script = await (await fetch('/api/script')).json();
   const events = script.events || [];
 
   const root = el('div', {});
   const title = el('h2', {}, 'Script Editor');
+
+  // Add Load from File button
+  const loadBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      const inp = el('input', {type: 'file', accept: '.json'});
+      inp.onchange = async () => {
+        const f = inp.files?.[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const loaded = JSON.parse(text);
+          // Clear and reload events
+          events.length = 0;
+          const loadedEvents = loaded.events || (Array.isArray(loaded) ? loaded : []);
+          events.push(...loadedEvents);
+          renderEvents();
+          alert(`Loaded ${events.length} events`);
+        } catch(e) {
+          alert('Failed to load script: ' + e.message);
+        }
+      };
+      inp.click();
+    }
+  }, '📁 Load from File');
 
   const table = el('table', {className: 'form script-table'});
   const thead = el('thead', {}, el('tr', {}, [
@@ -1716,7 +1950,7 @@ async function openScriptEditor(){
       typeSelect.value = evt.type || 'DO';
       typeSelect.onchange = () => {
         evt.type = typeSelect.value;
-        renderEvents(); // Re-render to show appropriate controls
+        renderEvents();
       };
 
       const channelInput = el('input', {
@@ -1732,8 +1966,7 @@ async function openScriptEditor(){
       let valueControl;
       let noNcControl = el('span', {}, '—');
 
-      if (evt.type === 'DO') {
-        // Digital output: checkbox for state
+      if (evt.type === 'DO' || !evt.type) {
         const stateCheck = el('input', {
           type: 'checkbox',
           checked: !!evt.state
@@ -1744,7 +1977,6 @@ async function openScriptEditor(){
           el('span', {}, 'ON')
         ]);
 
-        // NO/NC radio buttons
         const noRadio = el('input', {
           type: 'radio',
           name: `nonc_${idx}`,
@@ -1765,7 +1997,6 @@ async function openScriptEditor(){
           el('label', {style: 'display:flex;gap:4px'}, [ncRadio, 'NC'])
         ]);
       } else {
-        // Analog output: voltage input
         const voltInput = el('input', {
           type: 'number',
           value: evt.value || 0,
@@ -1865,6 +2096,7 @@ async function openScriptEditor(){
           body: JSON.stringify({events})
         });
         alert('Script saved successfully');
+        loadScript(); // Reload for script player
       } catch(e) {
         alert('Save failed: ' + e.message);
       }
@@ -1874,6 +2106,7 @@ async function openScriptEditor(){
 
   root.append(
     title,
+    el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn]),
     el('div', {style: 'margin:12px 0'}, [
       el('p', {}, 'Define timed events for automated control. Time is in seconds from script start.'),
       el('p', {style: 'font-size:12px;color:var(--muted)'},
@@ -1884,98 +2117,6 @@ async function openScriptEditor(){
   );
 
   showModal(root);
-}
-
-
-/* -------- structured config / pid forms (resizable modal) --------------- */
-async function openConfigForm(){
-  const cfg=await (await fetch('/api/config')).json();
-  configCache = cfg;
-  const root=el('div',{}); // panel gets CSS `resize: both`
-
-  const boards=fieldset('Boards', tableForm([
-    ['E-1608 boardNum',     inputNum(cfg.board1608,'boardNum',0)],
-    ['E-1608 sampleRateHz', inputNum(cfg.board1608,'sampleRateHz',1)],
-    ['E-1608 blockSize',    inputNum(cfg.board1608,'blockSize',1)],
-    ['E-TC boardNum',       inputNum(cfg.boardetc,'boardNum',0)],
-    ['E-TC sampleRateHz',   inputNum(cfg.boardetc,'sampleRateHz',1)],
-    ['E-TC blockSize',      inputNum(cfg.boardetc,'blockSize',1)]
-  ]));
-
-  const analogRows=(cfg.analogs||[]).map((a,i)=>[
-    `AI${i} name`, inputText(a,'name'),
-    `slope`,      inputNum(a,'slope',0.000001),
-    `offset`,     inputNum(a,'offset',0.000001),
-    `cutoffHz`,   inputNum(a,'cutoffHz',0.1),
-    `units`,      inputText(a,'units'),
-    `include`,    inputChk(a,'include')
-  ]);
-  const analogs=fieldset('Analogs (server scales Y = m·X + b)', tableFormRows(analogRows));
-
-  (cfg.digitalOutputs||[]).forEach(d=>{ if(!d.mode){ d.mode = d.momentary ? 'momentary' : 'toggle'; } });
-  const DO_MODES=['toggle','momentary','buzz'];
-  const doRows=(cfg.digitalOutputs||[]).map((d,i)=>[
-    `DO${i} name`, inputText(d,'name'),
-    `mode`,        selectEnum(DO_MODES,d.mode||'toggle',v=>{ d.mode=v; d.momentary = (v==='momentary'); }),
-    `normallyOpen`,inputChk(d,'normallyOpen'),
-    `actuationTime (s, toggle only)`, inputNum(d,'actuationTime',0.1),
-    `include`,     inputChk(d,'include')
-  ]);
-  const dig=fieldset('Digital Outputs', tableFormRows(doRows));
-
-  const aoRows=(cfg.analogOutputs||[]).map((a,i)=>[
-    `AO${i} name`, inputText(a,'name'),
-    `minV`,        inputNum(a,'minV',0.001),
-    `maxV`,        inputNum(a,'maxV',0.001),
-    `startupV`,    inputNum(a,'startupV',0.001),
-    `include`,     inputChk(a,'include')
-  ]);
-  const aos=fieldset('Analog Outputs (0–10 V)', tableFormRows(aoRows));
-
-  const tcRows=(cfg.thermocouples||[]).map((t,i)=>[
-    `TC${i} include`, inputChk(t,'include'),
-    `ch`,             inputNum(t,'ch',1),
-    `name`,           inputText(t,'name'),
-    `type`,           selectEnum(['K','J','T','E','R','S','B','N','C'], t.type||'K', v=>t.type=v),
-    `offset`,         inputNum(t,'offset',0.001)
-  ]);
-  const tcs=fieldset('Thermocouples', tableFormRows(tcRows));
-
-  const save=el('button',{className:'btn',onclick:async()=>{
-    try{ await fetch('/api/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)}); alert('Saved'); }
-    catch(e){ alert('Save failed: '+e.message); }
-  }},'Save');
-
-  root.append(boards,analogs,dig,aos,tcs, el('div',{style:'margin-top:8px'}, save));
-  showModal(root, ()=>{ renderPage(); });
-}
-
-async function openPidForm(){
-  const pid=await (await fetch('/api/pid')).json();
-  const rows=(pid.loops||[]).map((L,idx)=>[
-    `Loop ${idx} enabled`, inputChk(L,'enabled'),
-    `name`,  inputText(L,'name'),
-    `kind`,  selectEnum(['analog','digital','tc','calc'], L.kind||'analog', v=>L.kind=v),
-    `src`,   selectEnum(['ai','tc','calc'], L.src||'ai', v=>L.src=v),
-    `ai_ch`, inputNum(L,'ai_ch',1),
-    `out_ch`,inputNum(L,'out_ch',1),
-    `target`,inputNum(L,'target',0.0001),
-    `kp`,    inputNum(L,'kp',0.0001),
-    `ki`,    inputNum(L,'ki',0.0001),
-    `kd`,    inputNum(L,'kd',0.0001),
-    `out_min`,inputNum(L,'out_min',0.0001),
-    `out_max`,inputNum(L,'out_max',0.0001),
-    `err_min`,inputNum(L,'err_min',0.0001),
-    `err_max`,inputNum(L,'err_max',0.0001),
-    `i_min`,  inputNum(L,'i_min',0.0001),
-    `i_max`,  inputNum(L,'i_max',0.0001)
-  ]);
-  const fs=fieldset('PID Loops', tableFormRows(rows));
-  const save=el('button',{className:'btn',onclick:async()=>{
-    try{ await fetch('/api/pid',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(pid)}); alert('Saved'); }
-    catch(e){ alert('Save failed: '+e.message); }
-  }},'Save');
-  showModal(el('div',{},[fs, el('div',{style:'margin-top:8px'}, save)]), ()=>{ renderPage(); });
 }
 
 /* ----------------------------- form bits -------------------------------- */
