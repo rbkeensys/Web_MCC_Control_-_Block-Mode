@@ -14,6 +14,7 @@ body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.4 system-ui,
 .page-controls { display:flex; gap:8px; margin-top:6px; }
 .canvas { flex:1; position:relative; overflow:auto; padding:12px; }
 .widget { position:absolute; display:flex; flex-direction:column; background:var(--card); border:1px solid #262a3e; border-radius:12px; min-width:280px; min-height:180px; }
+.widget.dobutton-widget { min-width:70px; min-height:45px; }
 .widget header { display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:grab; }
 .widget header .title { font-weight:600; }
 .widget header .spacer { flex:1; }
@@ -25,7 +26,7 @@ legend { color:#a8b3cf; padding:0 6px; }
 .legend { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin:2px 0 4px; }
 .legend .item { display:flex; gap:6px; align-items:center; }
 .legend .swatch { width:12px; height:12px; border-radius:2px; background:#888; }
-.do-btn { width:100%; padding:10px; border-radius:10px; border:1px solid #2d334f; font-weight:700; }
+.do-btn { width:100%; padding:6px; border-radius:8px; border:1px solid #2d334f; font-weight:700; font-size:13px; }
 .do-btn.default { background:#2b3046; color:#bcc4e0; border-color:#384064; }
 .do-btn.inactive { background:#132619; color:#cfead8; border-color:#1e3b28; }
 .do-btn.active { background:#2a1212; color:#f1c5c5; border-color:#4a2222; }
@@ -46,7 +47,9 @@ table.form { width:100%; border-collapse:collapse; }
 table.form th, table.form td { border-bottom:1px solid #252a3f; padding:6px; text-align:left; }
 table.form th { color:#a8b3cf; font-weight:600; }
 table.form input, table.form select { width:100%; font-size:12px; padding:4px 6px; }
-.compact .form input, .compact .form select { font-size:12px; padding:3px 5px; }
+.compact .form input, .compact .form select { font-size:11px; padding:2px 4px; width:55%; }
+.compact .form th { font-size:11px; padding:4px; }
+.compact .form td { padding:4px; }
 
 /* Chart context menu */
 

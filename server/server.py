@@ -527,6 +527,24 @@ def set_ao(req: AOReq):
 def list_logs():
     return sorted([p.name for p in LOGS_DIR.glob("*") if p.is_dir()])
 
+@app.post("/api/logs/close")
+def close_log():
+    """Close current log and start a new one"""
+    global session_logger
+    if session_logger:
+        session_logger.close()
+        session_logger = None
+        
+        # Create new session
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_dir = LOGS_DIR / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        session_logger = SessionLogger(session_dir)
+        
+        return {"ok": True, "message": f"Log closed and new session started: {session_id}", "session_id": session_id}
+    else:
+        return {"ok": False, "message": "No active log to close"}
+
 @app.get("/api/logs/{session}/csv")
 def download_csv(session: str):
     path = LOGS_DIR/session/"session.csv"

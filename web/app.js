@@ -331,6 +331,25 @@ function hookLogButtons(){
     closeBtn._wired = true;
   }
 
+  const closeLogBtn = document.getElementById('closeLogBtn');
+  if (closeLogBtn && !closeLogBtn._wired){
+    closeLogBtn.addEventListener('click', async ()=>{
+      if (!confirm('Close current log and start a new one?')) return;
+      try {
+        const response = await fetch('/api/logs/close', { method: 'POST' });
+        const result = await response.json();
+        if (result.ok) {
+          alert(result.message || 'Log closed and new session started');
+        } else {
+          alert(result.message || 'Failed to close log');
+        }
+      } catch(e) {
+        alert('Failed to close log: ' + e.message);
+      }
+    });
+    closeLogBtn._wired = true;
+  }
+
   const progress = document.getElementById('replayProgress');
   if (progress && !progress._wired){
     progress.addEventListener('input', (e)=>{
@@ -807,9 +826,93 @@ function removeActivePage(){
 
 /* -------------------------- widgets ------------------------------------- */
 function addWidget(type){
-  const w={ id:crypto.randomUUID(), type, x:40, y:40, w:460, h:280, opts:defaultsFor(type) };
+  // Special handling for PID Panel - ask which loop to show
+  if (type === 'pidpanel') {
+    addPIDPanel();
+    return;
+  }
+  
+  // Custom default sizes for different widget types
+  let defaultW = 460, defaultH = 280;
+  if (type === 'gauge') {
+    defaultH = 340;
+  } else if (type === 'dobutton') {
+    defaultW = 120;
+    defaultH = 90;
+  }
+  
+  const w={ id:crypto.randomUUID(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
   state.pages[activePageIndex].widgets.push(w);
   renderPage();
+}
+
+async function addPIDPanel() {
+  try {
+    // Fetch current PID configuration to see how many loops exist
+    const pid = await (await fetch('/api/pid')).json();
+    const loops = pid.loops || [];
+    
+    if (loops.length === 0) {
+      alert('No PID loops configured. Configure PID loops first.');
+      return;
+    }
+    
+    // Build options list showing loop names
+    const options = loops.map((loop, idx) => {
+      const name = loop.name || `Loop ${idx}`;
+      const enabled = loop.enabled ? '✓' : '✗';
+      return `${idx}: ${name} (${enabled})`;
+    }).join('\n');
+    
+    const choice = prompt(
+      `Select PID Loop Index (0-${loops.length - 1}):\n\n${options}\n\nEnter loop index:`,
+      '0'
+    );
+    
+    if (choice === null) return; // User cancelled
+    
+    const loopIndex = parseInt(choice);
+    if (isNaN(loopIndex) || loopIndex < 0 || loopIndex >= loops.length) {
+      alert(`Invalid loop index. Must be between 0 and ${loops.length - 1}`);
+      return;
+    }
+    
+    // Create the widget with the selected loop index
+    const loopName = loops[loopIndex].name || `Loop ${loopIndex}`;
+    const w = {
+      id: crypto.randomUUID(),
+      type: 'pidpanel',
+      x: 40,
+      y: 40,
+      w: 320,
+      h: 600,
+      opts: {
+        title: `PID: ${loopName}`,
+        loopIndex: loopIndex,
+        showControls: true
+      }
+    };
+    
+    state.pages[activePageIndex].widgets.push(w);
+    renderPage();
+    
+  } catch(e) {
+    console.error('Failed to fetch PID config:', e);
+    alert('Failed to load PID configuration. Using default Loop 0.');
+    
+    // Fall back to default
+    const w = {
+      id: crypto.randomUUID(),
+      type: 'pidpanel',
+      x: 40,
+      y: 40,
+      w: 320,
+      h: 600,
+      opts: defaultsFor('pidpanel')
+    };
+    state.pages[activePageIndex].widgets.push(w);
+    renderPage();
+  }
 }
 
 // Update defaultsFor to give charts reasonable initial spans:
@@ -841,7 +944,8 @@ function renderPage(){
 }
 
 function renderWidget(w){
-  const box=el('div',{className:'widget', id:'w_'+w.id});
+  const classList = w.type === 'dobutton' ? 'widget dobutton-widget' : 'widget';
+  const box=el('div',{className:classList, id:'w_'+w.id});
   const tools=el('div',{className:'tools'},[
     el('span',{className:'icon', title:'Settings', onclick:()=>openWidgetSettings(w)}, '⚙'),
     el('span',{className:'icon', title:'Close',    onclick:()=>removeWidget(w.id)}, '×')
@@ -1383,12 +1487,17 @@ function mountGauge(w, body){
     }
     const span = (hi===lo)?1:(hi-lo);
 
-    // geometry
+    // geometry - ensure semicircle fits within canvas
     const cx=W/2;
-    const cy=H - 8; // sit near bottom
-    let rOuter = Math.min(W, H*2)/2 - 12; // padding
+    const padding = 12;
+    // Outer radius must fit: top needs rOuter space, bottom needs rOuter space
+    // cy is positioned so the semicircle's bottom edge doesn't exceed H
+    let rOuter = Math.min((W - 2*padding)/2, H - padding - 20); // 20px for labels at top
     if (!Number.isFinite(rOuter) || rOuter < 8) { requestAnimationFrame(draw); return; }
-
+    
+    // Position cy so bottom of semicircle is just above widget bottom
+    const cy = padding + rOuter; // Center is rOuter from top
+    
     let band = Math.max(6, Math.round(rOuter * 0.18));
     if (band >= rOuter - 2) band = Math.max(6, Math.floor((rOuter - 2) * 0.6));
     let rInner = rOuter - band;
@@ -1789,6 +1898,11 @@ function readSelection(sel){
 // drag/resize — block drag when interacting with inputs
 function makeDragResize(node, w, header, handle){
   let dragging=false,resizing=false,sx=0,sy=0,ox=0,oy=0,ow=0,oh=0;
+  
+  // Set minimum sizes based on widget type
+  const minW = (w.type === 'dobutton') ? 70 : 280;
+  const minH = (w.type === 'dobutton') ? 45 : 180;
+  
   header.addEventListener('mousedown', (e)=>{
     const tag=(e.target.tagName||'').toUpperCase();
     if (['INPUT','SELECT','BUTTON','TEXTAREA','LABEL','OPTION','SPAN'].includes(tag)) return;
@@ -1797,7 +1911,7 @@ function makeDragResize(node, w, header, handle){
   handle.addEventListener('mousedown', (e)=>{ resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault(); });
   window.addEventListener('mousemove',(e)=>{
     if(dragging){ w.x=ox+(e.clientX-sx); w.y=oy+(e.clientY-sy); node.style.left=w.x+'px'; node.style.top=w.y+'px'; }
-    if(resizing){ w.w=Math.max(280,ow+(e.clientX-sx)); w.h=Math.max(180,oh+(e.clientY-sy)); node.style.width=w.w+'px'; node.style.height=w.h+'px'; }
+    if(resizing){ w.w=Math.max(minW,ow+(e.clientX-sx)); w.h=Math.max(minH,oh+(e.clientY-sy)); node.style.width=w.w+'px'; node.style.height=w.h+'px'; }
   });
   window.addEventListener('mouseup',()=>{ dragging=false; resizing=false; });
 }
