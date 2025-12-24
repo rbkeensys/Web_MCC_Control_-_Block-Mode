@@ -8,7 +8,7 @@
         "index": 0,
         "comparison": "lt",
         "compare_to_type": "value",
-        "compare_value": 0.2,
+        "compare_value": 155.0,
         "compare_to_kind": "ao",
         "compare_to_index": null
       },

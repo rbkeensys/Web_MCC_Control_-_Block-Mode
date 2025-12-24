@@ -20,7 +20,7 @@ from motor_controller import MotorManager, list_serial_ports
 from logic_elements import LEManager
 from app_models import LEFile, LogicElementCfg
 import logging, os
-SERVER_VERSION = "0.8.8"  # PID gates explicitly force DO/AO to safe state when disabled
+SERVER_VERSION = "0.9.6"  # PID: state never resets on param changes, only on disable/gate
 
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
@@ -373,6 +373,9 @@ async def acq_loop():
     last_tc_vals: List[float] = []
     last_tc_time = time.perf_counter()
     min_tc_interval = 1.0 / max(1.0, TC_RATE_HZ)
+    
+    # PID telemetry from previous cycle (for cascade control)
+    last_pid_telemetry: List[Dict] = []
 
     try:
         while True:
@@ -455,13 +458,18 @@ async def acq_loop():
 
             # --- PIDs (may drive DO/AO) ---
             # Pass DO/LE state so PIDs can check their enable gates
+            # Pass previous cycle's PID telemetry for cascade control (pid source)
             telemetry = pid_mgr.step(
                 ai_vals=ai_scaled,
                 tc_vals=tc_vals,
                 bridge=mcc,
                 do_state=do,
-                le_state=le_tel
+                le_state=le_tel,
+                pid_prev=last_pid_telemetry
             )
+            
+            # Store for next cycle
+            last_pid_telemetry = telemetry
 
             # --- Logic Elements (Re-evaluation) ---
             # Re-evaluate LEs after PIDs so LEs can use PID outputs as inputs

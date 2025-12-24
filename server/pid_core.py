@@ -52,19 +52,46 @@ class PIDManager:
         self.last_gate_states: List[bool] = []  # Track gate states for change detection
 
     def load(self, pid_file):
-        self.loops.clear(); self.meta.clear(); self.last_gate_states.clear()
+        # Preserve existing PID states when reloading config
+        # Only reset state on disable/gate, never on parameter changes
+        old_loops = {meta.name: (pid, meta) for pid, meta in zip(self.loops, self.meta)}
+        
+        new_loops = []
+        new_meta = []
+        new_gate_states = []
+        
         for rec in pid_file.loops:
             d = LoopDef(**rec.dict())
-            self.loops.append(_PID(d))
-            self.meta.append(d)
-            self.last_gate_states.append(True)  # Assume enabled initially
+            
+            # Check if this PID existed before with same name
+            if d.name in old_loops:
+                old_pid, old_meta = old_loops[d.name]
+                
+                # Update parameters, keep ALL state intact (i, prev)
+                old_pid.d = d
+                
+                new_loops.append(old_pid)
+            else:
+                # New PID - create fresh
+                new_loops.append(_PID(d))
+            
+            new_meta.append(d)
+            new_gate_states.append(True)  # Assume enabled initially
+        
+        # Atomic swap - replace all lists at once
+        self.loops = new_loops
+        self.meta = new_meta
+        self.last_gate_states = new_gate_states
 
-    def step(self, ai_vals: List[float], tc_vals: List[float], bridge, do_state=None, le_state=None) -> List[Dict]:
+    def step(self, ai_vals: List[float], tc_vals: List[float], bridge, do_state=None, le_state=None, pid_prev=None) -> List[Dict]:
         import time
         dt = 1.0  # approximate; the outer loop is rate-controlled
         tel = []
         for i, (p, d) in enumerate(zip(self.loops, self.meta)):
             if not d.enabled:
+                # PID disabled via checkbox - reset state
+                p.i = 0.0
+                p.prev = None
                 # Add placeholder telemetry for disabled loops to maintain indexing
                 tel.append({"name": d.name, "pv": 0.0, "u": 0.0, "out": 0.0, "err": 0.0, "enabled": False})
                 continue
@@ -83,22 +110,47 @@ class PIDManager:
                     else:
                         gate_enabled = False
                 
-                # Log only on state transitions
+                # Log and handle state transitions
                 if i < len(self.last_gate_states):
                     if gate_enabled != self.last_gate_states[i]:
                         gate_type = f"{d.enable_kind.upper()}{d.enable_index}"
                         state_str = "ENABLED" if gate_enabled else "DISABLED"
                         print(f"[PID-GATE] Loop '{d.name}': {gate_type} → {state_str}")
+                        
+                        # Reset PID state when transitioning to disabled
+                        if not gate_enabled:
+                            p.i = 0.0
+                            p.prev = None
+                            print(f"[PID-GATE] Loop '{d.name}': State reset (i=0, prev=None)")
+                            
+                            # Force outputs to safe state
+                            if d.kind == "digital":
+                                bridge.set_do(d.out_ch, False, active_high=True)
+                            elif d.kind == "analog":
+                                bridge.set_ao(d.out_ch, 0.0)
+                        
                         self.last_gate_states[i] = gate_enabled
             
-            # Continue calculating PID even if gated (prevents windup, maintains state)
-            # Just don't write output when gated
+            # If gated, don't calculate - return zeros immediately
+            if not gate_enabled:
+                tel.append({"name": d.name, "pv": 0.0, "u": 0.0, "out": 0.0, "err": 0.0, "enabled": True, "gated": True})
+                continue
+            
+            # Gate enabled - calculate PID normally
             try:
                 pv = 0.0
                 if d.src == "ai":
                     pv = ai_vals[d.ai_ch]
+                elif d.src == "ao":
+                    # Read AO value (feedback from analog output)
+                    if d.ai_ch < len(bridge.ao_cache):
+                        pv = bridge.ao_cache[d.ai_ch]
                 elif d.src == "tc" and tc_vals:
                     pv = tc_vals[min(d.ai_ch, len(tc_vals)-1)]
+                elif d.src == "pid" and pid_prev:
+                    # Use previous cycle's PID output (cascade control)
+                    if d.ai_ch < len(pid_prev):
+                        pv = pid_prev[d.ai_ch].get("out", 0.0)
                 u, err = p.step(pv, dt)
                 
                 # Calculate output value
@@ -111,25 +163,14 @@ class PIDManager:
                     hi =  10.0 if d.out_max is None else d.out_max
                     ov = max(lo, min(hi, u))
                 
-                # WRITE to hardware based on gate state
-                if gate_enabled:
-                    if d.kind == "digital":
-                        bridge.set_do(d.out_ch, u >= 0.0, active_high=True)
-                    elif d.kind == "analog":
-                        bridge.set_ao(d.out_ch, ov)
-                    # var kind never writes to hardware
-                else:
-                    # Gate disabled - force outputs to safe state
-                    if d.kind == "digital":
-                        bridge.set_do(d.out_ch, False, active_high=True)  # Turn OFF
-                    elif d.kind == "analog":
-                        bridge.set_ao(d.out_ch, 0.0)  # Force to 0V
-                    # var kind has no hardware to control
+                # Write to hardware (we only get here if gate_enabled or no gate)
+                if d.kind == "digital":
+                    bridge.set_do(d.out_ch, u >= 0.0, active_high=True)
+                elif d.kind == "analog":
+                    bridge.set_ao(d.out_ch, ov)
+                # var kind never writes to hardware
                 
-                # Report output: if gated, show 0 for all outputs (they're forced off)
-                reported_out = 0.0 if not gate_enabled else ov
-                
-                tel.append({"name": d.name, "pv": pv, "u": u, "out": reported_out, "err": err, "enabled": True, "gated": not gate_enabled})
+                tel.append({"name": d.name, "pv": pv, "u": u, "out": ov, "err": err, "enabled": True, "gated": False})
             except Exception as e:
                 # Log error but continue with other PIDs
                 print(f"[PID] Loop '{d.name}' (kind={d.kind}) failed: {e}")

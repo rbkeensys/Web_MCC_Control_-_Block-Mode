@@ -1,5 +1,5 @@
 // app.js – UI v0.9.4 - PART 1 OF 2
-const UI_VERSION = "0.13.2";  // Fixed popup losing connection + averaged slope with linear regression
+const UI_VERSION = "0.13.3";  // Added AO to PID source options
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2204,7 +2204,7 @@ function mountPIDPanel(w, body){
     fetch('/api/pid').then(r=>r.json()).then(pid=>{
       const idx=w.opts.loopIndex|0; Object.assign(L, pid.loops?.[idx]||{});
       const selKind=selectEnum(['analog','digital','var'], L.kind||'analog', v=>L.kind=v);
-      const selSrc =selectEnum(['ai','tc','pid'], L.src ||'ai',    v=>L.src=v);
+      const selSrc =selectEnum(['ai','ao','tc','pid'], L.src ||'ai',    v=>L.src=v);
       row('enabled', chk(L,'enabled'));
       row('name', txt(L,'name'));
       row('kind', selKind);
@@ -3058,7 +3058,7 @@ async function openPidForm(){
         el('td', {}, chk(L, 'enabled')),
         el('td', {}, txt(L, 'name')),
         el('td', {}, selectEnum(['analog','digital','var'], L.kind||'analog', v=>L.kind=v)),
-        el('td', {}, selectEnum(['ai','tc','pid'], L.src||'ai', v=>L.src=v)),
+        el('td', {}, selectEnum(['ai','ao','tc','pid'], L.src||'ai', v=>L.src=v)),
         el('td', {}, num(L, 'ai_ch', 1)),
         el('td', {}, num(L, 'out_ch', 1)),
         el('td', {}, num(L, 'target', 0.0001)),

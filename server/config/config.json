@@ -15,7 +15,7 @@
       "name": "Pressure",
       "slope": 250.0,
       "offset": -123.2,
-      "cutoffHz": 0.025,
+      "cutoffHz": 0.5,
       "units": "psi",
       "include": true
     },
