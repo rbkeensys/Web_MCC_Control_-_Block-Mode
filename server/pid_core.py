@@ -111,15 +111,25 @@ class PIDManager:
                     hi =  10.0 if d.out_max is None else d.out_max
                     ov = max(lo, min(hi, u))
                 
-                # Only WRITE to hardware if gate is enabled (or no gate)
+                # WRITE to hardware based on gate state
                 if gate_enabled:
                     if d.kind == "digital":
                         bridge.set_do(d.out_ch, u >= 0.0, active_high=True)
                     elif d.kind == "analog":
                         bridge.set_ao(d.out_ch, ov)
                     # var kind never writes to hardware
+                else:
+                    # Gate disabled - force outputs to safe state
+                    if d.kind == "digital":
+                        bridge.set_do(d.out_ch, False, active_high=True)  # Turn OFF
+                    elif d.kind == "analog":
+                        bridge.set_ao(d.out_ch, 0.0)  # Force to 0V
+                    # var kind has no hardware to control
                 
-                tel.append({"name": d.name, "pv": pv, "u": u, "out": ov, "err": err, "enabled": True, "gated": not gate_enabled})
+                # Report output: if gated, show 0 for all outputs (they're forced off)
+                reported_out = 0.0 if not gate_enabled else ov
+                
+                tel.append({"name": d.name, "pv": pv, "u": u, "out": reported_out, "err": err, "enabled": True, "gated": not gate_enabled})
             except Exception as e:
                 # Log error but continue with other PIDs
                 print(f"[PID] Loop '{d.name}' (kind={d.kind}) failed: {e}")

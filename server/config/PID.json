@@ -6,7 +6,7 @@
       "src": "ai",
       "ai_ch": 0,
       "out_ch": 0,
-      "target": 0.01,
+      "target": 0.175,
       "kp": 100.0,
       "ki": 0.0,
       "kd": 0.0,
@@ -22,25 +22,25 @@
       "enable_index": 0
     },
     {
-      "enabled": false,
+      "enabled": true,
       "kind": "analog",
       "src": "ai",
       "ai_ch": 0,
-      "out_ch": 0,
-      "target": 0.0,
-      "kp": 333.0,
+      "out_ch": 1,
+      "target": 133.0,
+      "kp": 4.0,
       "ki": 0.0,
       "kd": 0.0,
       "out_min": 0.0,
-      "out_max": 10.0,
-      "err_min": -10.0,
-      "err_max": 10.0,
-      "i_min": 0.0,
-      "i_max": 0.0,
-      "name": "Temp",
-      "enable_gate": false,
+      "out_max": 4.0,
+      "err_min": 0.0,
+      "err_max": 9.0,
+      "i_min": -5.0,
+      "i_max": 5.0,
+      "name": "Buffer",
+      "enable_gate": true,
       "enable_kind": "do",
-      "enable_index": 0
+      "enable_index": 1
     }
   ]
 }

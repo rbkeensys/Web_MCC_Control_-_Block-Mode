@@ -1,5 +1,5 @@
 // app.js – UI v0.9.4 - PART 1 OF 2
-const UI_VERSION = "0.12.1";  // True fullscreen with browser chrome hidden + exit button
+const UI_VERSION = "0.13.2";  // Fixed popup losing connection + averaged slope with linear regression
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -805,6 +805,7 @@ function updateConnectBtn(){
 
 async function loadConfigCache(){
   try { const r=await fetch('/api/config'); if (r.ok) configCache = await r.json(); } catch {}
+  try { const r=await fetch('/api/pid'); if (r.ok) window.pidCache = await r.json(); } catch {}
 }
 
 async function setRate(){
@@ -1263,6 +1264,7 @@ function widgetOptions(w){
 const chartBuffers=new Map();
 const chartFilters=new Map();
 const chartCursor=new Map(); // w.id -> {x: number|null, mode:'follow'|'current', ctxEl:HTMLElement|null}
+const chartRAFHandles=new Map(); // w.id -> {rafId: number, isRunning: boolean}
 
 /* ==================== ENHANCED CHART WITH GRID ==================== */
 /* ==================== FIXED CHART SPAN - LIVE UPDATE ==================== */
@@ -1446,9 +1448,23 @@ function mountChart(w, body){
         updateChartPopupValues(w, cur.ctxEl, viewBuf, t0, xscale, plotL, ymin, ymax, (plotB-plotT)/(ymax-ymin), null);
       }
     }
-    requestAnimationFrame(draw);
+    
+    // Track RAF state
+    const rafState = chartRAFHandles.get(w.id) || {isRunning: false};
+    rafState.isRunning = true;
+    rafState.rafId = requestAnimationFrame(draw);
+    chartRAFHandles.set(w.id, rafState);
   }
-  draw();
+  
+  // Check if this widget had a running RAF before (e.g., after renderPage)
+  const existingRAF = chartRAFHandles.get(w.id);
+  if (existingRAF && existingRAF.isRunning) {
+    // Widget was recreated but RAF was running - restart it
+    draw();
+  } else {
+    // First time mount
+    draw();
+  }
 }
 
 // And update the widgetOptions to NOT update view.span directly:
@@ -1530,28 +1546,83 @@ function buildChartContextMenu(w, canvas, legend){
     closeBtn
   ]);
 
-  const follow=el('label',{},[el('input',{type:'radio',name:'mode',value:'follow'}),'Follow Cursor']);
-  const current=el('label',{},[el('input',{type:'radio',name:'mode',value:'current'}),'Current']);
-  const cur=chartCursor.get(w.id)||{mode:'follow'};
+  const cur=chartCursor.get(w.id)||{mode:'follow', sigDigits:2, showSlope:false};
+
+  // Compact layout: Follow / Slope on one line, Current / Digits on second line
+  const follow=el('label',{style:'margin-right:12px'},[
+    el('input',{type:'radio',name:'mode',value:'follow'}),
+    'Follow'
+  ]);
+  
+  const slope=el('label',{},[
+    el('input',{type:'checkbox',name:'showSlope'}),
+    'Slope'
+  ]);
+  
+  const current=el('label',{style:'margin-right:8px'},[
+    el('input',{type:'radio',name:'mode',value:'current'}),
+    'Current'
+  ]);
+
+  // Sig digits: just spinner + "#.##"
+  const sigDigits = el('input', {
+    type:'number', 
+    name:'sigDigits', 
+    min:0, 
+    max:10, 
+    step:1, 
+    value:cur.sigDigits||2,
+    style:'width:45px;margin-right:4px'
+  });
+  
+  const digitsLabel = el('span', {style:'display:inline-flex;align-items:center;gap:4px'}, [
+    sigDigits,
+    el('span', {style:'color:#7a8199;font-size:11px'}, '#.##')
+  ]);
 
   setTimeout(()=>{
     const radios=menu.querySelectorAll('input[type=radio][name=mode]');
     radios.forEach(r=>{ if (r.value=== (cur.mode||'follow')) r.checked=true; });
+    const slopeChk = menu.querySelector('input[name=showSlope]');
+    if (slopeChk) slopeChk.checked = cur.showSlope || false;
   });
 
-  menu.append(header, el('div',{className:'row'},follow), el('div',{className:'row'},current));
+  menu.append(
+    header, 
+    el('div',{className:'row', style:'display:flex;gap:8px;align-items:center'}, [follow, slope]),
+    el('div',{className:'row', style:'display:flex;gap:8px;align-items:center'}, [current, digitsLabel])
+  );
 
   const table=el('table',{},[
-    el('thead',{}, el('tr',{}, [el('th',{},'Series'), el('th',{},'Value')])),
+    el('thead',{}, el('tr',{}, [
+      el('th',{},'Series'), 
+      el('th',{},'Value'),
+      el('th',{id:`slope-header-${w.id}`, style:'display:none'},'Slope')
+    ])),
     el('tbody',{})
   ]);
   menu.append(table);
 
   menu.addEventListener('change',(e)=>{
     if (e.target && e.target.name==='mode'){
-      const cur=chartCursor.get(w.id)||{x:null, mode:'follow', ctxEl:menu};
+      const cur=chartCursor.get(w.id)||{x:null, mode:'follow', ctxEl:menu, sigDigits:2, showSlope:false};
       cur.mode=e.target.value;
       chartCursor.set(w.id,cur);
+    }
+    if (e.target && e.target.name==='sigDigits'){
+      const cur=chartCursor.get(w.id)||{x:null, mode:'follow', ctxEl:menu, sigDigits:2, showSlope:false};
+      cur.sigDigits=parseInt(e.target.value)||2;
+      chartCursor.set(w.id,cur);
+    }
+    if (e.target && e.target.name==='showSlope'){
+      const cur=chartCursor.get(w.id)||{x:null, mode:'follow', ctxEl:menu, sigDigits:2, showSlope:false};
+      cur.showSlope=e.target.checked;
+      chartCursor.set(w.id,cur);
+      // Show/hide slope column
+      const slopeHeader = menu.querySelector(`#slope-header-${w.id}`);
+      if (slopeHeader) slopeHeader.style.display = cur.showSlope ? '' : 'none';
+      const slopeCells = menu.querySelectorAll('.slope-cell');
+      slopeCells.forEach(cell => cell.style.display = cur.showSlope ? '' : 'none');
     }
   });
 
@@ -1604,21 +1675,110 @@ function getPopupMode(menu){
 function updateChartPopupValues(w, menu, buf, t0, xscale, plotL, ymin, ymax, yscale, cursorX){
   const mode=getPopupMode(menu);
   const tbody = menu.querySelector('tbody'); if(!tbody) return;
+  
+  // Get sig digits and showSlope from cursor state or menu
+  const cur = chartCursor.get(w.id);
+  let sigDigits = cur?.sigDigits || 2;
+  let showSlope = cur?.showSlope || false;
+  
+  const sigInput = menu.querySelector('input[name=sigDigits]');
+  if (sigInput && sigInput.value) {
+    sigDigits = parseInt(sigInput.value) || 2;
+  }
+  
+  const slopeChk = menu.querySelector('input[name=showSlope]');
+  if (slopeChk) {
+    showSlope = slopeChk.checked;
+  }
+  
+  // Update slope header visibility
+  const slopeHeader = menu.querySelector(`#slope-header-${w.id}`);
+  if (slopeHeader) slopeHeader.style.display = showSlope ? '' : 'none';
+  
   const vals=[];
   if (!buf.length){ tbody.innerHTML=''; return; }
+  
+  let targetIdx = buf.length - 1; // Current by default
   if (mode==='follow' && cursorX!==null){
     const t = t0 + (cursorX-plotL)/xscale;
-    const k = findNearestIndex(buf, t);
-    const v = buf[k].v;
-    (w.opts.series||[]).forEach((s,si)=>{ vals.push([s, v[si]]); });
-  } else {
-    const v = buf[buf.length-1].v;
-    (w.opts.series||[]).forEach((s,si)=>{ vals.push([s, v[si]]); });
+    targetIdx = findNearestIndex(buf, t);
   }
+  
+  const v = buf[targetIdx].v;
+  const t_current = buf[targetIdx].t;
+  
+  // Calculate slopes (units/second) averaged over 1s window or chart span if < 1s
+  const slopeWindow = Math.min(1.0, w.opts.span || 1.0);
+  const t_past = t_current - slopeWindow;
+  
+  (w.opts.series||[]).forEach((s,si)=>{ 
+    let slope = null;
+    if (showSlope && buf.length > 1) {
+      // Collect all points in the 1s window
+      const windowPoints = [];
+      for (let i = 0; i < buf.length; i++) {
+        if (buf[i].t >= t_past && buf[i].t <= t_current) {
+          const val = buf[i].v[si];
+          if (val !== null && isFinite(val)) {
+            windowPoints.push({t: buf[i].t, v: val});
+          }
+        }
+      }
+      
+      // Calculate average slope using linear regression
+      if (windowPoints.length >= 2) {
+        const n = windowPoints.length;
+        let sum_t = 0, sum_v = 0, sum_tv = 0, sum_tt = 0;
+        
+        for (const pt of windowPoints) {
+          sum_t += pt.t;
+          sum_v += pt.v;
+          sum_tv += pt.t * pt.v;
+          sum_tt += pt.t * pt.t;
+        }
+        
+        // Linear regression: slope = (n*sum_tv - sum_t*sum_v) / (n*sum_tt - sum_t*sum_t)
+        const denominator = n * sum_tt - sum_t * sum_t;
+        if (Math.abs(denominator) > 1e-10) {
+          slope = (n * sum_tv - sum_t * sum_v) / denominator;
+        }
+      }
+    }
+    
+    // Get units for this series
+    let units = '';
+    if (showSlope && slope !== null) {
+      if (s.kind === 'tc') {
+        units = '°C/s';
+      } else if (s.kind === 'ai' && configCache && configCache.analogs && configCache.analogs[s.index]) {
+        const aiUnits = configCache.analogs[s.index].units || '';
+        units = aiUnits ? `${aiUnits}/s` : '/s';
+      } else {
+        units = '/s';
+      }
+    }
+    
+    vals.push([s, v[si], slope, units]); 
+  });
+  
   tbody.innerHTML='';
-  vals.forEach(([s,v],si)=>{
+  vals.forEach(([s,v,slope,units],si)=>{
     const lab = s.name && s.name.length ? s.name : labelFor(s);
-    const tr=el('tr',{},[ el('td',{}, lab), el('td',{}, (v!=null && isFinite(v))? v.toFixed(6) : '—') ]);
+    const valueStr = (v!=null && isFinite(v))? v.toFixed(sigDigits) : '—';
+    const slopeStr = showSlope && slope !== null && isFinite(slope) ? `${slope.toFixed(sigDigits)} ${units}` : '—';
+    
+    const cells = [
+      el('td',{}, lab), 
+      el('td',{}, valueStr)
+    ];
+    
+    if (showSlope) {
+      cells.push(el('td',{className:'slope-cell'}, slopeStr));
+    } else {
+      cells.push(el('td',{className:'slope-cell', style:'display:none'}, slopeStr));
+    }
+    
+    const tr=el('tr',{}, cells);
     tbody.append(tr);
   });
 }
@@ -1676,6 +1836,13 @@ function labelFor(sel){
     if(sel.kind==='ao'){ return configCache.analogOutputs?.[sel.index]?.name || `AO${sel.index}`; }
     if(sel.kind==='do'){ return configCache.digitalOutputs?.[sel.index]?.name || `DO${sel.index}`; }
     if(sel.kind==='tc'){ return configCache.thermocouples?.[sel.index]?.name || `TC${sel.index}`; }
+    if(sel.kind==='pid'){ 
+      // Fetch PID name from cache if available
+      if (window.pidCache && window.pidCache.loops && window.pidCache.loops[sel.index]) {
+        return window.pidCache.loops[sel.index].name || `PID${sel.index}`;
+      }
+      return `PID${sel.index}`;
+    }
   }catch{}
   return `${sel.kind.toUpperCase()}${sel.index}`;
 }
@@ -2036,8 +2203,8 @@ function mountPIDPanel(w, body){
 
     fetch('/api/pid').then(r=>r.json()).then(pid=>{
       const idx=w.opts.loopIndex|0; Object.assign(L, pid.loops?.[idx]||{});
-      const selKind=selectEnum(['analog','digital','var','tc','calc'], L.kind||'analog', v=>L.kind=v);
-      const selSrc =selectEnum(['ai','tc','calc'], L.src ||'ai',    v=>L.src=v);
+      const selKind=selectEnum(['analog','digital','var'], L.kind||'analog', v=>L.kind=v);
+      const selSrc =selectEnum(['ai','tc','pid'], L.src ||'ai',    v=>L.src=v);
       row('enabled', chk(L,'enabled'));
       row('name', txt(L,'name'));
       row('kind', selKind);
@@ -2554,6 +2721,9 @@ function readSelection(sel){
     case 'ao': return state.ao[sel.index|0]??0;
     case 'do': return (state.do[sel.index|0]?1:0);
     case 'tc': return state.tc[sel.index|0]??0;
+    case 'pid': 
+      const pidLoop = state.pid[sel.index|0];
+      return pidLoop ? (pidLoop.out ?? 0) : 0;
   }
   return 0;
 }
@@ -2651,9 +2821,15 @@ function normalizeLayoutPages(pages){
 function showModal(content, onClose){
   const m=$('#modal'); m.classList.remove('hidden'); m.innerHTML='';
   const panel=el('div',{className:'panel'});
-  const closeBtn=el('button',{className:'btn',onclick:()=>{ m.classList.add('hidden'); if (typeof onClose==='function') onClose(); }},'Close');
+  const closeBtn=el('button',{className:'btn',onclick:()=>{ closeModal(onClose); }},'Close');
   const close=el('div',{style:'text-align:right;margin-bottom:8px;'}, closeBtn);
   panel.append(close,content); m.append(panel);
+}
+
+function closeModal(onClose){
+  const m=$('#modal'); 
+  m.classList.add('hidden'); 
+  if (typeof onClose==='function') onClose();
 }
 function openJsonEditor(title,url){
   fetch(url).then(r=>r.json()).then(obj=>{
@@ -2750,7 +2926,8 @@ async function openConfigForm(){
     `ch`,             inputNum(t,'ch',1),
     `name`,           inputText(t,'name'),
     `type`,           selectEnum(['K','J','T','E','R','S','B','N','C'], t.type||'K', v=>t.type=v),
-    `offset`,         inputNum(t,'offset',0.001)
+    `offset`,         inputNum(t,'offset',0.001),
+    `cutoffHz`,       inputNum(t,'cutoffHz',0.1)
   ]);
   const tcs=fieldset('Thermocouples', tableFormRows(tcRows));
 
@@ -2880,8 +3057,8 @@ async function openPidForm(){
         el('td', {}, `${idx}`),
         el('td', {}, chk(L, 'enabled')),
         el('td', {}, txt(L, 'name')),
-        el('td', {}, selectEnum(['analog','digital','var','tc','calc'], L.kind||'analog', v=>L.kind=v)),
-        el('td', {}, selectEnum(['ai','tc','calc'], L.src||'ai', v=>L.src=v)),
+        el('td', {}, selectEnum(['analog','digital','var'], L.kind||'analog', v=>L.kind=v)),
+        el('td', {}, selectEnum(['ai','tc','pid'], L.src||'ai', v=>L.src=v)),
         el('td', {}, num(L, 'ai_ch', 1)),
         el('td', {}, num(L, 'out_ch', 1)),
         el('td', {}, num(L, 'target', 0.0001)),
@@ -3678,7 +3855,7 @@ function openWidgetSettings(w){
     function redrawList(){
       list.innerHTML='';
       items.forEach((s,idx)=>{
-        const kindSel=selectEnum(['ai','ao','do','tc'], s.kind||'ai', v=>{ s.kind=v; s.name = s.name || labelFor(s); });
+        const kindSel=selectEnum(['ai','ao','do','tc','pid'], s.kind||'ai', v=>{ s.kind=v; s.name = s.name || labelFor(s); });
         const idxInput=el('input',{type:'number',min:0,step:1,value:s.index|0,style:'width:90px'});
         idxInput.onchange=()=>{ s.index=parseInt(idxInput.value)||0; s.name = s.name || labelFor(s); };
         const nameInput=el('input',{type:'text',value:(s.name && s.name.length)? s.name : labelFor(s),placeholder:'label'});

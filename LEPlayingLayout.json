@@ -63,8 +63,8 @@
               }
             ],
             "scale": "manual",
-            "min": -0.05,
-            "max": 0.025
+            "min": 0,
+            "max": 150
           }
         },
         {
@@ -91,7 +91,7 @@
             "title": "DO1",
             "doIndex": 1,
             "activeHigh": false,
-            "mode": "momentary",
+            "mode": "toggle",
             "buzzHz": 10,
             "actuationTime": 0,
             "_timer": null
@@ -100,8 +100,8 @@
         {
           "id": "f25e74ae-9f06-414a-adb9-3548c4866a8f",
           "type": "pidpanel",
-          "x": 40,
-          "y": 40,
+          "x": 20,
+          "y": 19,
           "w": 280,
           "h": 619,
           "opts": {
@@ -113,8 +113,8 @@
         {
           "id": "36a8db34-968a-4f8a-8779-d7dfb870a1ee",
           "type": "chart",
-          "x": 331,
-          "y": 358,
+          "x": 343,
+          "y": 398,
           "w": 1687,
           "h": 654,
           "opts": {
@@ -123,7 +123,7 @@
               {
                 "kind": "tc",
                 "index": 0,
-                "name": "Inlet"
+                "name": "Warmed Coolant"
               },
               {
                 "kind": "tc",
@@ -133,7 +133,7 @@
               {
                 "kind": "tc",
                 "index": 2,
-                "name": "Outlet"
+                "name": "Cold Coolant"
               },
               {
                 "kind": "tc",
@@ -146,19 +146,66 @@
                 "name": "Ambient"
               }
             ],
-            "span": 60,
+            "span": 180,
             "paused": false,
-            "scale": "auto",
-            "min": 0,
-            "max": 10,
+            "scale": "manual",
+            "min": -6,
+            "max": 25,
             "filterHz": 0,
             "cursorMode": "follow",
             "yGridLines": 5
           },
           "view": {
-            "span": 60,
+            "span": 180,
             "paused": false,
             "tFreeze": 0
+          }
+        },
+        {
+          "id": "c96b88e2-db19-4857-9c44-940e0be88d12",
+          "type": "le",
+          "x": 366,
+          "y": 196,
+          "w": 280,
+          "h": 160,
+          "opts": {
+            "title": "LE1",
+            "leIndex": 1,
+            "showInputs": true
+          }
+        },
+        {
+          "id": "3f3fe49e-0ea7-43a6-b1a8-0448b2644de6",
+          "type": "pidpanel",
+          "x": 1574,
+          "y": 17,
+          "w": 280,
+          "h": 622,
+          "opts": {
+            "title": "PID: Buffer",
+            "loopIndex": 1,
+            "showControls": true
+          }
+        },
+        {
+          "id": "c4681f75-d0d6-4aaf-9125-81c5c93c4d98",
+          "type": "gauge",
+          "x": 1111,
+          "y": 372,
+          "w": 460,
+          "h": 340,
+          "opts": {
+            "title": "Gauge",
+            "needles": [
+              {
+                "kind": "ao",
+                "index": 1,
+                "name": "Servo CMD"
+              }
+            ],
+            "scale": "manual",
+            "min": 0,
+            "max": 10
           }
         }
       ]

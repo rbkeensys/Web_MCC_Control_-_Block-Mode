@@ -20,7 +20,7 @@ from motor_controller import MotorManager, list_serial_ports
 from logic_elements import LEManager
 from app_models import LEFile, LogicElementCfg
 import logging, os
-SERVER_VERSION = "0.8.4"  # PID continues calculating when gated, just doesn't write output
+SERVER_VERSION = "0.8.8"  # PID gates explicitly force DO/AO to safe state when disabled
 
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
@@ -271,6 +271,8 @@ for idx, motor_cfg in enumerate(motor_file.motors):
 
 # Filters per AI ch (configured by config.json -> analogs[i].cutoffHz)
 lpf = OnePoleLPFBank()
+# Filters per TC ch (configured by config.json -> thermocouples[i].cutoffHz)
+lpf_tc = OnePoleLPFBank()
 
 ws_clients: List[WebSocket] = []
 session_logger: Optional[SessionLogger] = None
@@ -330,6 +332,10 @@ async def acq_loop():
         rate_hz=acq_rate_hz,
         cutoff_list=[a.cutoffHz for a in app_cfg.analogs],
     )
+    lpf_tc.configure(
+        rate_hz=acq_rate_hz,
+        cutoff_list=[tc.cutoffHz for tc in app_cfg.thermocouples],
+    )
 
     # Start session logging folder
     session_dir = LOGS_DIR / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -384,6 +390,10 @@ async def acq_loop():
                     rate_hz=acq_rate_hz,
                     cutoff_list=[a.cutoffHz for a in app_cfg.analogs],
                 )
+                lpf_tc.configure(
+                    rate_hz=acq_rate_hz,
+                    cutoff_list=[tc.cutoffHz for tc in app_cfg.thermocouples],
+                )
                 _need_reconfig_filters = False
                 print(f"[MCC-Hub] Reconfigured LPF for rate {acq_rate_hz} Hz")
 
@@ -403,7 +413,17 @@ async def acq_loop():
                     print(f"[MCC-Hub] TC read failed: {e}")
                     # keep last_tc_vals as-is on failure
                 last_tc_time = now_tc
-            tc_vals = last_tc_vals
+            
+            # Apply offset and LPF to TC values
+            tc_vals: List[float] = []
+            for i, raw in enumerate(last_tc_vals):
+                try:
+                    offset = app_cfg.thermocouples[i].offset if i < len(app_cfg.thermocouples) else 0.0
+                    val = raw + offset
+                    val = lpf_tc.apply(i, val)
+                    tc_vals.append(val)
+                except Exception:
+                    tc_vals.append(raw)
 
             # --- Scale + LPF AI values ---
             ai_scaled: List[float] = []

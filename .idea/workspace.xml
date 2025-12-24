@@ -4,20 +4,16 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="MODBUS motor controls added, bug fixes on ui elements.  TODO fix the popup monitor so it doesn't disconnect when opening any json editor.">
-      <change beforePath="$PROJECT_DIR$/.idea/Web-MCC-DAQ-and-Control Fast.iml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/Web-MCC-DAQ-and-Control Fast.iml" afterDir="false" />
+    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="MODBUS Motor Controls in (can't test yet). LE's working and added to PID and AO as gates.  Added fullscreen support and fixed page size.  Much improved">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/layout.json" beforeDir="false" afterPath="$PROJECT_DIR$/layout.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/layout_2025-11-06T23-17-26-749Z.json" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/LEPlayingLayout.json" beforeDir="false" afterPath="$PROJECT_DIR$/LEPlayingLayout.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/app_models.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/app_models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/PID.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/PID.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server/config/motor.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/motor.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/config/logic_elements.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/logic_elements.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/pid_core.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/pid_core.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/server.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/web/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/web/app.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/web/index.html" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/web/styles.css" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -36,7 +32,7 @@
   <component name="GithubPullRequestsUISettings">{
   &quot;selectedUrlAndAccountId&quot;: {
     &quot;url&quot;: &quot;https://github.com/rbkeensys/Web_MCC_Standard_Rate.git&quot;,
-    &quot;accountId&quot;: &quot;4ab0ca95-8e3c-402e-86c6-91fdc9b83b64&quot;
+    &quot;accountId&quot;: &quot;076be1ad-afdc-499e-a302-2db97f21c5eb&quot;
   }
 }</component>
   <component name="ProjectColorInfo">{
@@ -47,23 +43,23 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.MCC Web App.executor": "Run",
-    "Python.mcc_bridge.executor": "Run",
-    "Python.server.executor": "Run",
-    "Python.test_pid_var.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "ai.playground.ignore.import.keys.banner.in.settings": "true",
-    "git-widget-placeholder": "master",
-    "last_opened_file_path": "C:/Users/russ/Desktop/Web MCC App/Fast Bak1/Web-MCC-DAQ-and-Control Fast",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.MCC Web App.executor&quot;: &quot;Run&quot;,
+    &quot;Python.mcc_bridge.executor&quot;: &quot;Run&quot;,
+    &quot;Python.server.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_pid_var.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/russ/Desktop/Web MCC App/Fast Bak1/Web-MCC-DAQ-and-Control Fast&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager">
     <configuration name="MCC Web App" type="PythonConfigurationType" factoryName="Python" temporary="true">
       <module name="Web-MCC-DAQ-and-Control Fast" />
@@ -111,7 +107,9 @@
       <option name="number" value="Default" />
       <option name="presentableId" value="Default" />
       <updated>1763391021376</updated>
-      <workItem from="1766425526988" duration="4319000" />
+      <workItem from="1766425526988" duration="7254000" />
+      <workItem from="1766504659010" duration="5360000" />
+      <workItem from="1766586771201" duration="797000" />
     </task>
     <task id="LOCAL-00001" summary="Working standard rate, now has all editors working config, PID, script.  Scripts run too.">
       <option name="closed" value="true" />
@@ -169,11 +167,30 @@
       <option name="project" value="LOCAL" />
       <updated>1766093721631</updated>
     </task>
-    <option name="localTasksCounter" value="8" />
+    <task id="LOCAL-00008" summary="MODBUS Motor Controls in (can't test yet). LE's working and added to PID and AO as gates.  Added fullscreen support and fixed page size.  Much improved">
+      <option name="closed" value="true" />
+      <created>1766442659157</created>
+      <option name="number" value="00008" />
+      <option name="presentableId" value="LOCAL-00008" />
+      <option name="project" value="LOCAL" />
+      <updated>1766442659157</updated>
+    </task>
+    <option name="localTasksCounter" value="9" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Working standard rate, now has all editors working config, PID, script.  Scripts run too." />
@@ -181,7 +198,8 @@
     <MESSAGE value="Fixed some ui issues.&#10;TODO: Add close log and restart" />
     <MESSAGE value="Button, Gauge, PID Panel fixes" />
     <MESSAGE value="MODBUS motor controls added, bug fixes on ui elements.  TODO fix the popup monitor so it doesn't disconnect when opening any json editor." />
-    <option name="LAST_COMMIT_MESSAGE" value="MODBUS motor controls added, bug fixes on ui elements.  TODO fix the popup monitor so it doesn't disconnect when opening any json editor." />
+    <MESSAGE value="MODBUS Motor Controls in (can't test yet). LE's working and added to PID and AO as gates.  Added fullscreen support and fixed page size.  Much improved" />
+    <option name="LAST_COMMIT_MESSAGE" value="MODBUS Motor Controls in (can't test yet). LE's working and added to PID and AO as gates.  Added fullscreen support and fixed page size.  Much improved" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>
@@ -195,6 +213,6 @@
     </breakpoint-manager>
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
-    <SUITE FILE_PATH="coverage/server_py$MCC_Web_App.coverage" NAME="MCC Web App Coverage Results" MODIFIED="1766442536947" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/server" />
+    <SUITE FILE_PATH="coverage/server_py$MCC_Web_App.coverage" NAME="MCC Web App Coverage Results" MODIFIED="1766587278435" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/server" />
   </component>
 </project>

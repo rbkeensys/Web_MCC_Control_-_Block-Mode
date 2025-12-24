@@ -45,6 +45,7 @@ class ThermocoupleCfg(BaseModel):
     name: str = "TC"
     type: str = "K"
     offset: float = 0.0
+    cutoffHz: float = 0.0  # Low-pass filter cutoff frequency (0 = disabled)
 
 class AppConfig(BaseModel):
     board1608: Board1608Cfg
