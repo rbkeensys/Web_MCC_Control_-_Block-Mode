@@ -1,5 +1,5 @@
 // app.js – UI v0.9.4 - PART 1 OF 2
-const UI_VERSION = "0.13.3";  // Added AO to PID source options
+const UI_VERSION = "0.13.6";  // Added per-series display scaling and offset
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -1369,10 +1369,13 @@ function mountChart(w, body){
 
       let ymin = Infinity, ymax = -Infinity;
       for (let si = 0; si < w.opts.series.length; si++){
+        const s = w.opts.series[si];
+        const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
+        const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
         for (const b of viewBuf){
-          const y = b.v[si];
-          if (y < ymin) ymin = y;
-          if (y > ymax) ymax = y;
+          const displayValue = (b.v[si] * displayScale) + displayOffset;
+          if (displayValue < ymin) ymin = displayValue;
+          if (displayValue > ymax) ymax = displayValue;
         }
       }
       if (w.opts.scale === 'manual'){ ymin = w.opts.min; ymax = w.opts.max; }
@@ -1422,11 +1425,15 @@ function mountChart(w, body){
       // Draw series
       legend.innerHTML='';
       (w.opts.series||[]).forEach((s, si)=>{
+        const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
+        const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+        
         ctx.beginPath();
         let first = true;
         for (const b of viewBuf){
+          const displayValue = (b.v[si] * displayScale) + displayOffset;
           const x = plotL + (b.t - t0) * xscale;
-          const y = plotB - (b.v[si] - ymin) * yscale;
+          const y = plotB - (displayValue - ymin) * yscale;
           if (first){ ctx.moveTo(x,y); first=false; } else ctx.lineTo(x,y);
         }
         ctx.strokeStyle = colorFor(si); ctx.lineWidth = 2; ctx.stroke();
@@ -1863,7 +1870,12 @@ function mountGauge(w, body){
 
     let lo=w.opts.min, hi=w.opts.max;
     if (w.opts.scale==='auto'){
-      const vals=(w.opts.needles||[]).map(sel=>readSelection(sel));
+      const vals=(w.opts.needles||[]).map(needle => {
+        const v = readSelection(needle);
+        const displayScale = needle.displayScale !== undefined ? needle.displayScale : 1.0;
+        const displayOffset = needle.displayOffset !== undefined ? needle.displayOffset : 0.0;
+        return (v * displayScale) + displayOffset;
+      });
       lo=Math.min(...vals,0); hi=Math.max(...vals,1);
       if(lo===hi){ lo-=1; hi+=1; }
     }
@@ -1935,7 +1947,11 @@ function mountGauge(w, body){
     ctx.lineWidth=3;
     needles.forEach((s,si)=>{
       const v = readSelection(s);
-      const frac = clamp((v - lo)/span, 0, 1);
+      const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
+      const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+      const displayValue = (v * displayScale) + displayOffset;
+      
+      const frac = clamp((displayValue - lo)/span, 0, 1);
       const ang = Math.PI + (0 - Math.PI) * frac;
       const nx = Math.cos(ang), ny = Math.sin(ang);
       ctx.strokeStyle=colorFor(si);
@@ -1979,7 +1995,12 @@ function mountBars(w, body){
     // Determine scale
     let lo = w.opts.min, hi = w.opts.max;
     if (w.opts.scale === 'auto') {
-      const vals = (w.opts.series || []).map(sel => readSelection(sel));
+      const vals = (w.opts.series || []).map(s => {
+        const v = readSelection(s);
+        const displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
+        const displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+        return (v * displayScale) + displayOffset;
+      });
       lo = Math.min(...vals, 0);
       hi = Math.max(...vals, 1);
       if (lo === hi) { lo -= 1; hi += 1; }
@@ -2031,7 +2052,11 @@ function mountBars(w, body){
 
     series.forEach((sel, idx) => {
       const v = readSelection(sel);
-      const t = Math.max(0, Math.min(1, (v - lo) / span));
+      const displayScale = sel.displayScale !== undefined ? sel.displayScale : 1.0;
+      const displayOffset = sel.displayOffset !== undefined ? sel.displayOffset : 0.0;
+      const displayValue = (v * displayScale) + displayOffset;
+      
+      const t = Math.max(0, Math.min(1, (displayValue - lo) / span));
       const x = plotL + (idx + 0.5) * ((plotR - plotL) / N);
       const y = plotB - t * (plotB - plotT);
       const h = plotB - y;
@@ -2048,11 +2073,11 @@ function mountBars(w, body){
       }
 
       // Draw value on top of bar
-      if (Number.isFinite(v)) {
+      if (Number.isFinite(displayValue)) {
         ctx.fillStyle = '#e6e6e6';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(v.toFixed(2), x, y - 2);
+        ctx.fillText(displayValue.toFixed(2), x, y - 2);
         ctx.textBaseline = 'top';
       }
     });
@@ -2175,14 +2200,12 @@ function updateDOButtons(){
 }
 
 /* -------------------------------- PID ----------------------------------- */
-// This version adds a "Reset I" button next to the Apply button
-
 function mountPIDPanel(w, body){
   const line=el('div',{className:'small', id:'pid_'+w.id, style:'display:inline-block'}, 'pv=—, err=—, out=—');
-
+  
   // Enable indicator container (will be populated if gating is configured)
   const enableContainer = el('div', {style:'display:inline-block;margin-left:8px;vertical-align:middle'});
-
+  
   body.append(el('div', {style:'display:flex;align-items:center'}, [line, enableContainer]));
 
   // Fetch PID config to check if enable gate is configured
@@ -2233,34 +2256,7 @@ function mountPIDPanel(w, body){
         await fetch('/api/pid',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(pid2)});
       }}, 'Apply');
 
-      const resetI=el('button',{
-        className:'btn',
-        style:'margin-left:8px',
-        onclick:async()=>{
-          try {
-            const resp = await fetch('/api/pid/reset_i', {
-              method:'POST',
-              headers:{'Content-Type':'application/json'},
-              body:JSON.stringify({loop_index: w.opts.loopIndex|0})
-            });
-            const result = await resp.json();
-            if (result.ok) {
-              console.log('PID integral term reset:', result.message);
-              // Optional: show brief visual feedback
-              resetI.style.background = '#2faa60';
-              setTimeout(() => { resetI.style.background = ''; }, 300);
-            } else {
-              console.error('Failed to reset integral:', result.error);
-              alert('Failed to reset integral: ' + result.error);
-            }
-          } catch(e) {
-            console.error('Reset I failed:', e);
-            alert('Reset I failed: ' + e.message);
-          }
-        }
-      }, 'Reset I');
-
-      ctr.append(tbl, el('div',{style:'margin-top:6px'}, [save, resetI]));
+      ctr.append(tbl, el('div',{style:'margin-top:6px'}, save));
     });
 
     body.append(ctr);
@@ -2269,23 +2265,23 @@ function mountPIDPanel(w, body){
   (function update(){
     const loop=state.pid[w.opts.loopIndex]||null;
     const p=$('#pid_'+w.id);
-    if(loop&&p){
+    if(loop&&p){ 
       p.textContent=`pv=${(loop.pv??0).toFixed(3)}, err=${(loop.err??0).toFixed(3)}, out=${(loop.out??0).toFixed(3)}`;
-
+      
       // Update enable indicator if gating is configured
       if (pidConfig && pidConfig.enable_gate) {
         let enabled = false;
-
+        
         if (pidConfig.enable_kind === 'do') {
           enabled = state.do?.[pidConfig.enable_index] ? true : false;
         } else if (pidConfig.enable_kind === 'le') {
           enabled = state.le?.[pidConfig.enable_index]?.output ? true : false;
         }
-
+        
         const statusText = enabled ? '1' : '0';
         const color = enabled ? '#2faa60' : '#d84a4a';
         const gated = loop.gated ? ' (GATED)' : '';
-
+        
         enableContainer.innerHTML = `
           <div style="display:inline-block;text-align:center;padding:2px 4px;border:1px solid ${color};border-radius:3px;background:#1a1d2e;min-width:35px;vertical-align:middle">
             <div style="font-size:7px;color:#9aa1b9;line-height:1.1">EN</div>
@@ -2300,7 +2296,6 @@ function mountPIDPanel(w, body){
     requestAnimationFrame(update);
   })();
 }
-
 
 function selectEnum(options, value, onChange){
   const s=el('select',{}); options.forEach(opt=>s.append(el('option',{value:opt},opt)));
@@ -3574,8 +3569,6 @@ async function openLEEditor(){
   showModal(root, ()=>{ renderPage(); });
 }
 
-// This version changes the Save button to always pop up a file save dialog
-
 async function openScriptEditor(){
   const script = await (await fetch('/api/script')).json();
   const events = script.events || [];
@@ -3784,37 +3777,23 @@ async function openScriptEditor(){
     style: 'margin-left:8px'
   }, 'Sort by Time');
 
-  // UPDATED: Save button now opens file dialog AND saves to server
   const saveBtn = el('button', {
     className: 'btn',
     onclick: async () => {
       try {
-        // First save to server (for script player to use)
         await fetch('/api/script', {
           method: 'PUT',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({events})
         });
-
-        // Then trigger file download dialog
-        const scriptData = {events: events};
-        const blob = new Blob([JSON.stringify(scriptData, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = el('a', {
-          href: url,
-          download: 'script.json'
-        });
-        a.click();
-        URL.revokeObjectURL(url);
-
-        alert('Script saved to server and file downloaded');
+        alert('Script saved successfully');
         loadScript(); // Reload for script player
       } catch(e) {
         alert('Save failed: ' + e.message);
       }
     },
     style: 'margin-left:8px'
-  }, '💾 Save');
+  }, 'Save');
 
   root.append(
     title,
@@ -3830,7 +3809,6 @@ async function openScriptEditor(){
 
   showModal(root);
 }
-
 
 /* ----------------------------- form bits -------------------------------- */
 function fieldset(title, inner){ const fs=el('fieldset',{}); fs.append(el('legend',{},title), inner); return fs; }
@@ -3902,16 +3880,42 @@ function openWidgetSettings(w){
     function redrawList(){
       list.innerHTML='';
       items.forEach((s,idx)=>{
+        // Ensure display scale/offset exist
+        s.displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
+        s.displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+        
         const kindSel=selectEnum(['ai','ao','do','tc','pid'], s.kind||'ai', v=>{ s.kind=v; s.name = s.name || labelFor(s); });
-        const idxInput=el('input',{type:'number',min:0,step:1,value:s.index|0,style:'width:90px'});
+        const idxInput=el('input',{type:'number',min:0,step:1,value:s.index|0,style:'width:60px'});
         idxInput.onchange=()=>{ s.index=parseInt(idxInput.value)||0; s.name = s.name || labelFor(s); };
-        const nameInput=el('input',{type:'text',value:(s.name && s.name.length)? s.name : labelFor(s),placeholder:'label'});
+        const nameInput=el('input',{type:'text',value:(s.name && s.name.length)? s.name : labelFor(s),placeholder:'label',style:'width:80px'});
         nameInput.oninput=()=>s.name=nameInput.value;
+        
+        // Display scaling inputs
+        const scaleInput=el('input',{type:'number',step:'any',value:s.displayScale,style:'width:60px',title:'Display Scale (multiplier)'});
+        scaleInput.oninput=()=>s.displayScale=parseFloat(scaleInput.value)||1.0;
+        const offsetInput=el('input',{type:'number',step:'any',value:s.displayOffset,style:'width:60px',title:'Display Offset (added after scale)'});
+        offsetInput.oninput=()=>s.displayOffset=parseFloat(offsetInput.value)||0.0;
+        
         const rm=el('span',{className:'icon',onclick:()=>{ items.splice(idx,1); redrawList(); }}, '−');
-        list.append(el('div',{className:'row'},[kindSel, idxInput, nameInput, rm]));
+        
+        const row = el('div',{style:'display:flex;gap:4px;align-items:center;margin:4px 0;flex-wrap:wrap'},[
+          el('span',{style:'min-width:40px;font-size:11px;color:var(--muted)'},'Kind:'),
+          kindSel,
+          el('span',{style:'min-width:30px;font-size:11px;color:var(--muted)'},'Ch:'),
+          idxInput,
+          el('span',{style:'min-width:40px;font-size:11px;color:var(--muted)'},'Name:'),
+          nameInput,
+          el('br',{}),
+          el('span',{style:'min-width:40px;font-size:11px;color:var(--muted)'},'Scale:'),
+          scaleInput,
+          el('span',{style:'min-width:45px;font-size:11px;color:var(--muted)'},'Offset:'),
+          offsetInput,
+          rm
+        ]);
+        list.append(row);
       });
     }
-    const add=el('span',{className:'icon',onclick:()=>{ const s={kind:'ai',index:0,name: labelFor({kind:'ai',index:0})}; items.push(s); redrawList(); }}, '+ Add');
+    const add=el('span',{className:'icon',onclick:()=>{ const s={kind:'ai',index:0,name: labelFor({kind:'ai',index:0}),displayScale:1.0,displayOffset:0.0}; items.push(s); redrawList(); }}, '+ Add');
     redrawList();
     root.append(el('h4',{}, (w.type==='gauge'?'Needles':'Series')), list, el('div',{style:'margin-top:8px'}, add));
   }
