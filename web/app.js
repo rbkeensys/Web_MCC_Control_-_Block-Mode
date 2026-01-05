@@ -1,5 +1,5 @@
 // app.js – UI v0.9.4 - PART 1 OF 2
-const UI_VERSION = "0.13.7";  // LE widget shows 'X' for missing/invalid TC inputs
+const UI_VERSION = "0.13.8";  // Added Math Operator widgets
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -679,6 +679,7 @@ function feedTick(msg){
   if (msg.pid) state.pid = msg.pid;
   if (msg.motors) state.motors = msg.motors;
   if (msg.le) state.le = msg.le;  // Logic Elements
+  if (msg.math) state.math = msg.math;  // Math Operators
   onTick();
 }
 
@@ -708,6 +709,7 @@ function wireUI(){
   $('#editPID')?.addEventListener('click', ()=>openPidForm());
   $('#editMotor')?.addEventListener('click', ()=>openMotorEditor());
   $('#editLE')?.addEventListener('click', ()=>openLEEditor());  // Logic Elements
+  $('#editMath')?.addEventListener('click', ()=>openMathEditor());  // Math Operators
   $('#editScript')?.addEventListener('click', ()=>openScriptEditor());
   $('#saveLayout')?.addEventListener('click', saveLayoutToFile);
   $('#loadLayout')?.addEventListener('click', loadLayoutFromFile);
@@ -914,16 +916,25 @@ function addWidget(type){
     return;
   }
   
+  // Special handling for Math Op - fetch math config for name
+  if (type === 'mathop') {
+    addMathOpWidget();
+    return;
+  }
+  
   // Custom default sizes for different widget types
   let defaultW = 460, defaultH = 280;
   if (type === 'gauge') {
     defaultH = 340;
   } else if (type === 'dobutton') {
     defaultW = 120;
-    defaultH = 90;
+    defaultH = 45;  // Reduced from 90
   } else if (type === 'le') {
     defaultW = 280;  // Compact for LE
-    defaultH = 160;
+    defaultH = 80;   // Reduced from 160
+  } else if (type === 'mathop') {
+    defaultW = 280;
+    defaultH = 80;   // Reduced from 160
   }
   
   const w={ id:crypto.randomUUID(), type, x:40, y:40, w:defaultW, h:defaultH, opts:defaultsFor(type) };
@@ -1122,6 +1133,70 @@ async function addLEWidget() {
   }
 }
 
+async function addMathOpWidget() {
+  try {
+    // Fetch math operator configuration
+    const mathData = await (await fetch('/api/math_operators')).json();
+    const operators = mathData.operators || [];
+    
+    if (operators.length === 0) {
+      alert('No Math Operators configured. Please configure Math Operators first.');
+      return;
+    }
+    
+    // Create modal with dropdown selector
+    const root = el('div', {});
+    root.append(el('h3', {}, 'Select Math Operator'));
+    
+    const selector = el('select', {style: 'width:100%; font-size:14px; padding:8px'});
+    operators.forEach((m, i) => {
+      const name = m.name || `Math${i}`;
+      const op = m.operation || 'add';
+      const label = `${name} (${op})`;
+      selector.append(el('option', {value: i}, label));
+    });
+    
+    root.append(
+      el('div', {style: 'margin:16px 0'}, [
+        el('label', {}, ['Math Operator: ', selector])
+      ])
+    );
+    
+    const addBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        const mathIndex = parseInt(selector.value);
+        const mathName = operators[mathIndex].name || `Math${mathIndex}`;
+        
+        const w = {
+          id: crypto.randomUUID(),
+          type: 'mathop',
+          x: 40,
+          y: 40,
+          w: 280,
+          h: 160,
+          opts: {
+            title: mathName,
+            mathIndex: mathIndex,
+            showInputs: true
+          }
+        };
+        
+        state.pages[activePageIndex].widgets.push(w);
+        renderPage();
+        closeModal();
+      }
+    }, 'Add Widget');
+    
+    root.append(addBtn);
+    showModal(root);
+    
+  } catch(e) {
+    console.error('Failed to add Math Op widget:', e);
+    alert('Failed to load Math Operator configuration.');
+  }
+}
+
 // Update defaultsFor to give charts reasonable initial spans:
 function defaultsFor(type){
   switch(type){
@@ -1132,10 +1207,383 @@ function defaultsFor(type){
     case 'pidpanel': return { title:'PID', loopIndex:0, showControls:true };
     case 'aoslider': return { title:'AO', aoIndex:0, min:0, max:10, step:0.0025, live:true };
     case 'motor':    return { title:'Motor', motorIndex:0, showControls:true };
+    case 'mathop':   return { title:'Math', mathIndex:0, showInputs:true };
   }
   return {};
 }
 
+function tableForm(pairs) {
+  const tbl = el('table', {className: 'form'}), tbody = el('tbody');
+  for (const [label, input] of pairs) {
+    const tr = el('tr');
+    tr.append(el('th', {}, label), el('td', {}, input));
+    tbody.append(tr);
+  }
+  tbl.append(el('thead', {}, el('tr', {}, [el('th', {}, 'Field'), el('th', {}, 'Value')])), tbody);
+  return tbl;
+}
+
+function tableFormRows(rows) {
+  const tbl = el('table', {className: 'form'}), tbody = el('tbody');
+  for (const row of rows) {
+    const tr = el('tr');
+    for (let i = 0; i < row.length; i += 2) {
+      tr.append(el('th', {}, row[i]), el('td', {}, row[i + 1]));
+    }
+    tbody.append(tr);
+  }
+  tbl.append(el('thead', {}, el('tr', {}, [
+    el('th', {}, 'Field'), el('th', {}, 'Value'),
+    el('th', {}, 'Field'), el('th', {}, 'Value'),
+    el('th', {}, 'Field'), el('th', {}, 'Value'),
+    el('th', {}, 'Field'), el('th', {}, 'Value')
+  ])), tbody);
+  return tbl;
+}
+
+function inputText(obj, key) {
+  const i = el('input', {type: 'text', value: obj[key] ?? ''});
+  i.oninput = () => obj[key] = i.value;
+  return i;
+}
+
+function inputNum(obj, key, step) {
+  const i = el('input', {type: 'number', step: step ?? 'any', value: obj[key] ?? 0});
+  i.oninput = () => obj[key] = parseFloat(i.value) || 0;
+  return i;
+}
+
+function inputChk(obj, key) {
+  const i = el('input', {type: 'checkbox', checked: !!obj[key]});
+  i.onchange = () => obj[key] = !!i.checked;
+  return i;
+}
+
+function selectEnum(options, value, onChange) {
+  const s = el('select', {});
+  options.forEach(opt => s.append(el('option', {value: opt}, opt)));
+  s.value = value;
+  s.onchange = () => onChange(s.value);
+  return s;
+}
+
+function saveLayoutToFile() {
+  const blob = new Blob([JSON.stringify({pages: state.pages}, null, 2)], {type: 'application/json'});
+  const a = el('a', {href: URL.createObjectURL(blob), download: 'layout.json'});
+  a.click();
+}
+
+function loadLayoutFromFile() {
+  const inp = el('input', {type: 'file', accept: '.json'});
+  inp.onchange = () => {
+    const f = inp.files?.[0];
+    if (!f) return;
+    const rd = new FileReader();
+    rd.onload = () => {
+      try {
+        const obj = JSON.parse(rd.result);
+        if (!obj.pages || !Array.isArray(obj.pages)) throw new Error('Invalid layout file');
+        state.pages = normalizeLayoutPages(obj.pages);   // <-- ensure defaults exist
+        refreshPages();
+        setActivePage(0);
+      } catch (e) {
+        alert('Load failed: ' + e.message);
+      }
+    };
+    rd.readAsText(f);
+  };
+  inp.click();
+}
+
+/* ----------------------- widget settings modal -------------------------- */
+function openWidgetSettings(w) {
+  const root = el('div', {});
+  const titleHeader = el('h3', {}, (w.opts.title || w.type) + ' — Settings');
+  const titleInput = inputText(w.opts, 'title');
+  titleInput.oninput = () => {
+    w.opts.title = titleInput.value;
+    const t = document.querySelector('#w_' + w.id + ' header .title');
+    if (t) t.textContent = w.opts.title || w.type;
+    const b = document.querySelector('#w_' + w.id + ' .do-btn');
+    if (b) b.textContent = w.opts.title || 'DO';
+  };
+  const nameRow = tableForm([['Title', titleInput]]);
+  root.append(el('div', {}, [titleHeader]), nameRow, el('hr', {className: 'soft'}));
+
+  if (w.type === 'chart' || w.type === 'bars' || w.type === 'gauge') {
+    const list = el('div', {});
+    const items = (w.type === 'gauge') ? (w.opts.needles = w.opts.needles || []) : (w.opts.series = w.opts.series || []);
+
+    function redrawList() {
+      list.innerHTML = '';
+      items.forEach((s, idx) => {
+        // Ensure display scale/offset exist
+        s.displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
+        s.displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
+
+        const kindSel = selectEnum(['ai', 'ao', 'do', 'tc', 'pid'], s.kind || 'ai', v => {
+          s.kind = v;
+          s.name = s.name || labelFor(s);
+        });
+        const idxInput = el('input', {type: 'number', min: 0, step: 1, value: s.index | 0, style: 'width:60px'});
+        idxInput.onchange = () => {
+          s.index = parseInt(idxInput.value) || 0;
+          s.name = s.name || labelFor(s);
+        };
+        const nameInput = el('input', {
+          type: 'text',
+          value: (s.name && s.name.length) ? s.name : labelFor(s),
+          placeholder: 'label',
+          style: 'width:80px'
+        });
+        nameInput.oninput = () => s.name = nameInput.value;
+
+        // Display scaling inputs
+        const scaleInput = el('input', {
+          type: 'number',
+          step: 'any',
+          value: s.displayScale,
+          style: 'width:60px',
+          title: 'Display Scale (multiplier)'
+        });
+        scaleInput.oninput = () => s.displayScale = parseFloat(scaleInput.value) || 1.0;
+        const offsetInput = el('input', {
+          type: 'number',
+          step: 'any',
+          value: s.displayOffset,
+          style: 'width:60px',
+          title: 'Display Offset (added after scale)'
+        });
+        offsetInput.oninput = () => s.displayOffset = parseFloat(offsetInput.value) || 0.0;
+
+        const rm = el('span', {
+          className: 'icon', onclick: () => {
+            items.splice(idx, 1);
+            redrawList();
+          }
+        }, '−');
+
+        const row = el('div', {style: 'display:flex;gap:4px;align-items:center;margin:4px 0;flex-wrap:wrap'}, [
+          el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Kind:'),
+          kindSel,
+          el('span', {style: 'min-width:30px;font-size:11px;color:var(--muted)'}, 'Ch:'),
+          idxInput,
+          el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Name:'),
+          nameInput,
+          el('br', {}),
+          el('span', {style: 'min-width:40px;font-size:11px;color:var(--muted)'}, 'Scale:'),
+          scaleInput,
+          el('span', {style: 'min-width:45px;font-size:11px;color:var(--muted)'}, 'Offset:'),
+          offsetInput,
+          rm
+        ]);
+        list.append(row);
+      });
+    }
+
+    const add = el('span', {
+      className: 'icon', onclick: () => {
+        const s = {
+          kind: 'ai',
+          index: 0,
+          name: labelFor({kind: 'ai', index: 0}),
+          displayScale: 1.0,
+          displayOffset: 0.0
+        };
+        items.push(s);
+        redrawList();
+      }
+    }, '+ Add');
+    redrawList();
+    root.append(el('h4', {}, (w.type === 'gauge' ? 'Needles' : 'Series')), list, el('div', {style: 'margin-top:8px'}, add));
+  }
+
+  if (w.type === 'dobutton') {
+    const modeSel = selectEnum(['toggle', 'momentary', 'buzz'], w.opts.mode || 'toggle', v => w.opts.mode = v);
+    root.append(tableForm([
+      ['Title', titleInput],
+      ['Index', inputNum(w.opts, 'doIndex', 1)], ['Active High', inputChk(w.opts, 'activeHigh')],
+      ['Mode', modeSel], ['Buzz Hz', inputNum(w.opts, 'buzzHz', 10)],
+      ['Actuation Time (s, toggle)', inputNum(w.opts, 'actuationTime', 0.01)]
+    ]));
+  }
+
+  if (w.type === 'aoslider') {
+    const minI = inputNum(w.opts, 'min', 0.001);
+    const maxI = inputNum(w.opts, 'max', 0.001);
+    const stepI = inputNum(w.opts, 'step', 0.0001);
+    const applyAOdom = () => {
+      const node = document.querySelector('#w_' + w.id);
+      if (!node) return;
+      const rng = node.querySelector('input[type="range"]');
+      const cur = node.querySelector('input[type="number"]');
+      if (rng) {
+        rng.min = w.opts.min;
+        rng.max = w.opts.max;
+        rng.step = w.opts.step;
+      }
+      if (cur) {
+        cur.min = w.opts.min;
+        cur.max = w.opts.max;
+        cur.step = w.opts.step;
+      }
+      const hdr = node.querySelector('header .title');
+      if (hdr) hdr.textContent = w.opts.title || 'AO';
+    };
+    minI.oninput = () => {
+      w.opts.min = parseFloat(minI.value) || 0;
+      applyAOdom();
+    };
+    maxI.oninput = () => {
+      w.opts.max = parseFloat(maxI.value) || 10;
+      applyAOdom();
+    };
+    stepI.oninput = () => {
+      w.opts.step = parseFloat(stepI.value) || 0.0001;
+      applyAOdom();
+    };
+
+    root.append(tableForm([
+      ['Title', titleInput],
+      ['AO Index', inputNum(w.opts, 'aoIndex', 1)],
+      ['Min V', minI],
+      ['Max V', maxI],
+      ['Step V', stepI],
+      ['Live (send on move)', inputChk(w.opts, 'live')]
+    ]));
+  }
+
+  if (w.type === 'pidpanel') {
+    // Async load PID loops for dropdown
+    (async () => {
+      try {
+        const pid = await (await fetch('/api/pid')).json();
+        const loops = pid.loops || [];
+
+        const loopSelector = el('select', {});
+        loops.forEach((loop, idx) => {
+          const name = loop.name || `Loop ${idx}`;
+          const enabled = loop.enabled ? '✓' : '✗';
+          loopSelector.append(el('option', {value: idx}, `${name} (${enabled})`));
+        });
+        loopSelector.value = w.opts.loopIndex || 0;
+        loopSelector.onchange = () => {
+          w.opts.loopIndex = parseInt(loopSelector.value);
+          renderPage();
+        };
+
+        root.append(tableForm([
+          ['Loop', loopSelector],
+          ['Show Controls', inputChk(w.opts, 'showControls')]
+        ]));
+      } catch (e) {
+        root.append(tableForm([
+          ['Loop Index', inputNum(w.opts, 'loopIndex', 1)],
+          ['Show Controls', inputChk(w.opts, 'showControls')]
+        ]));
+      }
+    })();
+  }
+
+  if (w.type === 'motor') {
+    // Async load motors for dropdown
+    (async () => {
+      try {
+        const motorData = await (await fetch('/api/motors')).json();
+        const motors = motorData.motors || [];
+
+        const motorSelector = el('select', {});
+        motors.forEach((m, i) => {
+          const included = m.include ? '✓' : '✗';
+          motorSelector.append(el('option', {value: i}, `${m.name || `Motor ${i}`} (${included})`));
+        });
+        motorSelector.value = w.opts.motorIndex || 0;
+        motorSelector.onchange = () => {
+          w.opts.motorIndex = parseInt(motorSelector.value);
+          renderPage();
+        };
+
+        root.append(tableForm([
+          ['Motor', motorSelector],
+          ['Show Controls', inputChk(w.opts, 'showControls')]
+        ]));
+      } catch (e) {
+        root.append(tableForm([
+          ['Motor Index', inputNum(w.opts, 'motorIndex', 1)],
+          ['Show Controls', inputChk(w.opts, 'showControls')]
+        ]));
+      }
+    })();
+  }
+
+  if (w.type === 'le') {
+    // Async load LEs for dropdown
+    (async () => {
+      try {
+        const leData = await (await fetch('/api/logic_elements')).json();
+        const elements = leData.elements || [];
+
+        const leSelector = el('select', {});
+        elements.forEach((le, i) => {
+          const name = le.name || `LE${i}`;
+          const op = (le.operation || 'and').toUpperCase();
+          leSelector.append(el('option', {value: i}, `${name} (${op})`));
+        });
+        leSelector.value = w.opts.leIndex || 0;
+        leSelector.onchange = () => {
+          w.opts.leIndex = parseInt(leSelector.value);
+          renderPage();
+        };
+
+        root.append(tableForm([
+          ['Logic Element', leSelector],
+          ['Show Inputs', inputChk(w.opts, 'showInputs')]
+        ]));
+      } catch (e) {
+        root.append(tableForm([
+          ['LE Index', inputNum(w.opts, 'leIndex', 1)],
+          ['Show Inputs', inputChk(w.opts, 'showInputs')]
+        ]));
+      }
+    })();
+  }
+
+  if (w.type === 'mathop') {
+    // Async load math operators for dropdown
+    (async () => {
+      try {
+        const mathData = await (await fetch('/api/math_operators')).json();
+        const operators = mathData.operators || [];
+
+        const mathSelector = el('select', {});
+        operators.forEach((m, i) => {
+          const name = m.name || `Math${i}`;
+          const op = m.operation || 'add';
+          mathSelector.append(el('option', {value: i}, `${name} (${op})`));
+        });
+        mathSelector.value = w.opts.mathIndex || 0;
+        mathSelector.onchange = () => {
+          w.opts.mathIndex = parseInt(mathSelector.value);
+          renderPage();
+        };
+
+        root.append(tableForm([
+          ['Math Operator', mathSelector],
+          ['Show Inputs', inputChk(w.opts, 'showInputs')]
+        ]));
+      } catch (e) {
+        root.append(tableForm([
+          ['Math Index', inputNum(w.opts, 'mathIndex', 1)],
+          ['Show Inputs', inputChk(w.opts, 'showInputs')]
+        ]));
+      }
+    })();
+  }
+
+  showModal(root, () => {
+    renderPage();
+  });
+}
 function renderPage(){
   const cv=$('#canvas'); cv.innerHTML='';
   const page=state.pages[activePageIndex];
@@ -1182,6 +1630,7 @@ function renderWidget(w){
     case 'aoslider': mountAOSlider(w,body); break;
     case 'motor':    mountMotorController(w,body); break;
     case 'le':       mountLEWidget(w,body); break;
+    case 'mathop':   mountMathOpWidget(w,body); break;
   }
   return box;
 }
@@ -2201,7 +2650,78 @@ function updateDOButtons(){
 
 /* -------------------------------- PID ----------------------------------- */
 function mountPIDPanel(w, body){
-  const line=el('div',{className:'small', id:'pid_'+w.id, style:'display:inline-block'}, 'pv=—, err=—, out=—');
+  const line=el('div',{
+    className:'small', 
+    id:'pid_'+w.id, 
+    style:'display:inline-block;cursor:pointer',
+    title:'Click to toggle PID details',
+    onclick: () => {
+      const detailsDiv = document.getElementById('pid_details_' + w.id);
+      if (detailsDiv) {
+        if (detailsDiv.style.display === 'none') {
+          detailsDiv.style.display = 'block';
+          // Position near the widget
+          const widgetEl = document.getElementById('w_' + w.id);
+          if (widgetEl) {
+            const rect = widgetEl.getBoundingClientRect();
+            detailsDiv.style.left = (rect.right + 10) + 'px';
+            detailsDiv.style.top = rect.top + 'px';
+          }
+        } else {
+          detailsDiv.style.display = 'none';
+        }
+      }
+    }
+  }, 'pv=—, err=—, out=—');
+  
+  // Create floating draggable details panel
+  const detailsPanel = el('div', {
+    id: 'pid_details_' + w.id,
+    style: 'display:none;position:fixed;z-index:10000;padding:8px;background:#1a1d2e;border:2px solid #7aa2f7;border-radius:6px;font-family:monospace;font-size:11px;box-shadow:0 4px 12px rgba(0,0,0,0.5);min-width:200px'
+  });
+  
+  // Add draggable header
+  const header = el('div', {
+    style: 'cursor:move;padding:4px;margin:-8px -8px 8px -8px;background:#2a3046;border-radius:4px 4px 0 0;font-weight:bold;color:#7aa2f7;display:flex;justify-content:space-between;align-items:center'
+  });
+  
+  const headerTitle = el('span', {}, 'PID Details');
+  const closeBtn = el('span', {
+    style: 'cursor:pointer;padding:0 4px;color:#d84a4a;font-size:16px',
+    onclick: () => {
+      detailsPanel.style.display = 'none';
+    }
+  }, '×');
+  
+  header.append(headerTitle, closeBtn);
+  
+  const content = el('div', {id: 'pid_details_content_' + w.id});
+  detailsPanel.append(header, content);
+  
+  // Make draggable
+  let isDragging = false;
+  let dragOffsetX = 0, dragOffsetY = 0;
+  
+  header.onmousedown = (e) => {
+    isDragging = true;
+    dragOffsetX = e.clientX - detailsPanel.offsetLeft;
+    dragOffsetY = e.clientY - detailsPanel.offsetTop;
+    e.preventDefault();
+  };
+  
+  document.addEventListener('mousemove', (e) => {
+    if (isDragging) {
+      detailsPanel.style.left = (e.clientX - dragOffsetX) + 'px';
+      detailsPanel.style.top = (e.clientY - dragOffsetY) + 'px';
+    }
+  });
+  
+  document.addEventListener('mouseup', () => {
+    isDragging = false;
+  });
+  
+  // Append to body (not to widget)
+  document.body.append(detailsPanel);
   
   // Enable indicator container (will be populated if gating is configured)
   const enableContainer = el('div', {style:'display:inline-block;margin-left:8px;vertical-align:middle'});
@@ -2291,6 +2811,24 @@ function mountPIDPanel(w, body){
         `;
       } else {
         enableContainer.innerHTML = '';
+      }
+      
+      // Update details panel content if visible
+      const detailsDiv = document.getElementById('pid_details_' + w.id);
+      const contentDiv = document.getElementById('pid_details_content_' + w.id);
+      if (detailsDiv && contentDiv && detailsDiv.style.display !== 'none') {
+        contentDiv.innerHTML = `
+          <table style="width:100%;border-collapse:collapse">
+            <tr><td style="padding:2px;font-size:10px">PV:</td><td style="padding:2px;text-align:right;font-weight:bold">${(loop.pv??0).toFixed(4)}</td></tr>
+            <tr style="background:#0d1117"><td style="padding:2px;font-size:10px">SP:</td><td style="padding:2px;text-align:right">${(loop.target??0).toFixed(4)}</td></tr>
+            <tr><td style="padding:2px;font-size:10px;color:#ff9e64">Error:</td><td style="padding:2px;text-align:right;color:#ff9e64;font-weight:bold">${(loop.err??0).toFixed(4)}</td></tr>
+            <tr style="background:#0d1117"><td style="padding:2px;font-size:10px">P:</td><td style="padding:2px;text-align:right">${(loop.p_term??0).toFixed(4)}</td></tr>
+            <tr><td style="padding:2px;font-size:10px">I:</td><td style="padding:2px;text-align:right">${(loop.i_term??0).toFixed(4)}</td></tr>
+            <tr style="background:#0d1117"><td style="padding:2px;font-size:10px">D:</td><td style="padding:2px;text-align:right">${(loop.d_term??0).toFixed(4)}</td></tr>
+            <tr><td style="padding:2px;font-size:10px;color:#7aa2f7">u:</td><td style="padding:2px;text-align:right;color:#7aa2f7;font-weight:bold">${(loop.u??0).toFixed(4)}</td></tr>
+            <tr style="background:#0d1117"><td style="padding:2px;font-size:10px;color:#2faa60">Out:</td><td style="padding:2px;text-align:right;color:#2faa60;font-weight:bold">${(loop.out??0).toFixed(4)}</td></tr>
+          </table>
+        `;
       }
     }
     requestAnimationFrame(update);
@@ -2736,6 +3274,159 @@ function mountLEWidget(w, body){
   })();
 }
 
+function mountMathOpWidget(w, body){
+  body.style.padding = '4px';
+  body.style.fontSize = '10px';
+  body.style.fontFamily = 'monospace';
+  
+  let mathConfig = null;
+  
+  // Fetch math operator configuration
+  (async () => {
+    try {
+      const resp = await fetch('/api/math_operators');
+      const data = await resp.json();
+      mathConfig = data.operators?.[w.opts.mathIndex ?? 0];
+      
+      // Update widget title with op name
+      if (mathConfig && mathConfig.name) {
+        const titleEl = document.querySelector(`#w_${w.id} .title`);
+        if (titleEl) {
+          titleEl.textContent = mathConfig.name;
+        }
+      }
+    } catch(e) {
+      console.error('Failed to load math op config:', e);
+    }
+  })();
+  
+  (function update(){
+    const idx = w.opts.mathIndex ?? 0;
+    const mathOp = state.math?.[idx];
+    
+    if (!mathConfig) {
+      body.innerHTML = `<div style="text-align:center;color:var(--muted);padding:20px;font-size:11px">Math${idx}<br>Loading config...</div>`;
+      setTimeout(update, 100);
+      return;
+    }
+    
+    // Check if state.math exists at all
+    if (!state.math) {
+      body.innerHTML = `<div style="text-align:center;color:#ff9e64;padding:20px;font-size:11px">Math system not initialized<br><span style="font-size:9px">Create operators in Math editor</span></div>`;
+      setTimeout(update, 1000);
+      return;
+    }
+    
+    // Check if this specific operator exists
+    if (!mathOp) {
+      body.innerHTML = `<div style="text-align:center;color:#ff9e64;padding:20px;font-size:11px">Math${idx} not found<br><span style="font-size:9px">${state.math.length} operators configured</span></div>`;
+      setTimeout(update, 1000);
+      return;
+    }
+
+    // Get operation symbol/name
+    const opSymbols = {
+      'add': '+', 'sub': '−', 'mul': '×', 'div': '÷',
+      'mod': 'mod', 'pow': '^', 'min': 'min', 'max': 'max',
+      'sqr': 'x²', 'sqrt': '√', 'log10': 'log₁₀', 'ln': 'ln',
+      'exp': 'exp', 'sin': 'sin', 'cos': 'cos', 'tan': 'tan',
+      'asin': 'asin', 'acos': 'acos', 'atan': 'atan', 'atan2': 'atan2',
+      'abs': '|x|', 'neg': '−x'
+    };
+    const opDisplay = opSymbols[mathConfig.operation] || mathConfig.operation;
+    
+    // Check if binary or unary
+    const isBinary = mathOp.input_b !== null && mathOp.input_b !== undefined;
+    
+    // Format values
+    const valA = Number.isFinite(mathOp.input_a) ? mathOp.input_a.toFixed(3) : '---';
+    const valB = isBinary && Number.isFinite(mathOp.input_b) ? mathOp.input_b.toFixed(3) : null;
+    const output = Number.isFinite(mathOp.output) ? mathOp.output.toFixed(3) : '---';
+    
+    // Get input labels
+    const getLabel = (inp) => {
+      if (!inp) return '?';
+      const k = inp.kind || 'ai';
+      const i = inp.index || 0;
+      if (k === 'ai') return `AI${i}`;
+      if (k === 'ao') return `AO${i}`;
+      if (k === 'tc') return `TC${i}`;
+      if (k === 'pid_u') return `PID${i}`;
+      if (k === 'math') return `M${i}`;
+      return '?';
+    };
+    
+    const labelA = getLabel(mathConfig.input_a);
+    const labelB = isBinary ? getLabel(mathConfig.input_b) : null;
+    
+    if (w.opts.showInputs) {
+      // Show detailed layout with inputs
+      if (isBinary) {
+        // Binary: [A] [OP] [B] = [OUT]
+        body.innerHTML = `
+          <div style="display:flex;gap:2px;justify-content:center;align-items:center;height:100%;padding:2px">
+            <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
+              <div style="font-size:7px;color:#79c0ff;line-height:1.2">${labelA}</div>
+              <div style="font-size:14px;font-weight:bold;line-height:1.2;color:#9aa1b9">${valA}</div>
+            </div>
+            <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;flex:0 0 35px;overflow:hidden">
+              <div style="font-size:14px;font-weight:bold;color:#e0af68;line-height:1.4">${opDisplay}</div>
+            </div>
+            <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
+              <div style="font-size:7px;color:#79c0ff;line-height:1.2">${labelB}</div>
+              <div style="font-size:14px;font-weight:bold;line-height:1.2;color:#9aa1b9">${valB}</div>
+            </div>
+            <div style="text-align:center;padding:3px;flex:0 0 15px">
+              <div style="font-size:14px;color:#9aa1b9;line-height:1.4">=</div>
+            </div>
+            <div style="text-align:center;padding:3px;border:2px solid #7aa2f7;border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
+              <div style="font-size:7px;color:#9aa1b9;line-height:1.2">OUT</div>
+              <div style="font-size:16px;font-weight:bold;line-height:1.2;color:#7aa2f7">${output}</div>
+            </div>
+          </div>
+        `;
+      } else {
+        // Unary: [OP]([A]) = [OUT]
+        body.innerHTML = `
+          <div style="display:flex;gap:2px;justify-content:center;align-items:center;height:100%;padding:2px">
+            <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;flex:0 0 45px;overflow:hidden">
+              <div style="font-size:12px;font-weight:bold;color:#e0af68;line-height:1.4">${opDisplay}</div>
+            </div>
+            <div style="text-align:center;padding:2px;flex:0 0 10px">
+              <div style="font-size:16px;color:#7a7f8f;line-height:1.4">(</div>
+            </div>
+            <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
+              <div style="font-size:7px;color:#79c0ff;line-height:1.2">${labelA}</div>
+              <div style="font-size:14px;font-weight:bold;line-height:1.2;color:#9aa1b9">${valA}</div>
+            </div>
+            <div style="text-align:center;padding:2px;flex:0 0 10px">
+              <div style="font-size:16px;color:#7a7f8f;line-height:1.4">)</div>
+            </div>
+            <div style="text-align:center;padding:2px;flex:0 0 15px">
+              <div style="font-size:14px;color:#9aa1b9;line-height:1.4">=</div>
+            </div>
+            <div style="text-align:center;padding:3px;border:2px solid #7aa2f7;border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
+              <div style="font-size:7px;color:#9aa1b9;line-height:1.2">OUT</div>
+              <div style="font-size:16px;font-weight:bold;line-height:1.2;color:#7aa2f7">${output}</div>
+            </div>
+          </div>
+        `;
+      }
+    } else {
+      // Compact: just show output
+      body.innerHTML = `
+        <div style="display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;gap:2px">
+          <div style="font-size:9px;color:#9aa1b9">${opDisplay}</div>
+          <div style="font-size:22px;font-weight:bold;color:#7aa2f7">${output}</div>
+          <div style="font-size:8px;color:#7a7f8f">${mathConfig.name || 'Math'}</div>
+        </div>
+      `;
+    }
+    
+    requestAnimationFrame(update);
+  })();
+}
+
 /* ------------------------ tick / read / drag ---------------------------- */
 function onTick(){
   if (replayMode !== null) {
@@ -2838,6 +3529,11 @@ function normalizeLayoutPages(pages){
       case 'le':
         w.opts.title = w.opts.title ?? 'Logic Element';
         w.opts.leIndex = Number.isInteger(w.opts.leIndex) ? w.opts.leIndex : 0;
+        w.opts.showInputs = (w.opts.showInputs !== false);
+        break;
+      case 'mathop':
+        w.opts.title = w.opts.title ?? 'Math';
+        w.opts.mathIndex = Number.isInteger(w.opts.mathIndex) ? w.opts.mathIndex : 0;
         w.opts.showInputs = (w.opts.showInputs !== false);
         break;
     }
@@ -3581,14 +4277,13 @@ async function openLEEditor(){
   showModal(root, ()=>{ renderPage(); });
 }
 
-async function openScriptEditor(){
-  const script = await (await fetch('/api/script')).json();
-  const events = script.events || [];
-
+async function openMathEditor(){
+  const math_data = await (await fetch('/api/math_operators')).json();
+  const operators = math_data.operators || [];
+  
   const root = el('div', {});
-  const title = el('h2', {}, 'Script Editor');
-
-  // Add Load from File button
+  const title = el('h2', {}, 'Math Operators Editor');
+  
   const loadBtn = el('button', {
     className: 'btn',
     onclick: () => {
@@ -3599,470 +4294,676 @@ async function openScriptEditor(){
         try {
           const text = await f.text();
           const loaded = JSON.parse(text);
-          // Clear and reload events
-          events.length = 0;
-          const loadedEvents = loaded.events || (Array.isArray(loaded) ? loaded : []);
-          events.push(...loadedEvents);
-          renderEvents();
-          alert(`Loaded ${events.length} events`);
+          Object.assign(math_data, loaded);
+          alert('Math config loaded! Close and reopen to see changes, or click Save to apply.');
         } catch(e) {
-          alert('Failed to load script: ' + e.message);
+          alert('Failed to load Math config: ' + e.message);
         }
       };
       inp.click();
     }
   }, '📁 Load from File');
 
-  const table = el('table', {className: 'form script-table'});
-  const thead = el('thead', {}, el('tr', {}, [
-    el('th', {}, 'Time (s)'),
-    el('th', {}, 'Duration (s)'),
-    el('th', {}, 'Type'),
-    el('th', {}, 'Channel'),
-    el('th', {}, 'Value/State'),
-    el('th', {}, 'NO/NC'),
-    el('th', {}, 'Actions')
-  ]));
-  const tbody = el('tbody', {});
-
-  function renderEvents(){
-    tbody.innerHTML = '';
-    events.forEach((evt, idx) => {
-      const timeInput = el('input', {
-        type: 'number',
-        value: evt.time || 0,
-        step: 0.1,
-        min: 0,
-        style: 'width:80px'
+  const addUnaryBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      operators.push({
+        enabled: true,
+        name: `Math${operators.length}`,
+        operation: 'sqr',
+        input_a: {kind: 'ai', index: 0}
       });
-      timeInput.oninput = () => evt.time = parseFloat(timeInput.value) || 0;
+      renderMathEditor();
+    }
+  }, '+ Add Unary (sqr, sqrt, etc)');
 
-      const durationInput = el('input', {
-        type: 'number',
-        value: evt.duration || 0,
-        step: 0.1,
-        min: 0,
-        style: 'width:80px'
+  const addBinaryBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      operators.push({
+        enabled: true,
+        name: `Math${operators.length}`,
+        operation: 'add',
+        input_a: {kind: 'ai', index: 0},
+        input_b: {kind: 'ai', index: 1}
       });
-      durationInput.oninput = () => evt.duration = parseFloat(durationInput.value) || 0;
+      renderMathEditor();
+    }
+  }, '+ Add Binary (+, -, ×, ÷)');
 
-      const typeSelect = el('select', {style: 'width:80px'}, [
-        el('option', {value: 'DO'}, 'DO'),
-        el('option', {value: 'AO'}, 'AO')
-      ]);
-      typeSelect.value = evt.type || 'DO';
-      typeSelect.onchange = () => {
-        evt.type = typeSelect.value;
-        renderEvents();
+  const container = el('div', {style: 'overflow:auto;max-height:60vh'});
+
+  function renderMathEditor() {
+    container.innerHTML = '';
+    
+    operators.forEach((op, idx) => {
+      const card = el('fieldset', {style: 'margin-bottom:20px; padding:12px;'});
+      const legend = el('legend', {}, `Math${idx}: ${op.name}`);
+      card.append(legend);
+
+      const topRow = el('div', {className: 'row', style: 'margin-bottom:12px'});
+      topRow.append(
+        el('label', {}, [
+          el('input', {type: 'checkbox', checked: op.enabled, onchange: e => op.enabled = e.target.checked}),
+          ' Enabled'
+        ]),
+        el('label', {style: 'flex:2'}, [
+          'Name: ',
+          el('input', {type: 'text', value: op.name, oninput: e => op.name = e.target.value, style: 'width:100%'})
+        ]),
+        el('button', {
+          className: 'btn danger',
+          onclick: () => {
+            if (confirm(`Delete Math${idx}?`)) {
+              operators.splice(idx, 1);
+              renderMathEditor();
+            }
+          }
+        }, '🗑 Delete')
+      );
+      card.append(topRow);
+
+      // Operation select
+      const opRow = el('div', {style: 'margin:12px 0'});
+      const opSelect = el('select', {
+        onchange: e => {
+          op.operation = e.target.value;
+          // Binary ops need input_b, unary don't
+          const binary = ['add','sub','mul','div','mod','pow','min','max','atan2'];
+          if (binary.includes(e.target.value)) {
+            if (!op.input_b) op.input_b = {kind: 'ai', index: 1};
+          } else {
+            delete op.input_b;
+          }
+          renderMathEditor();
+        },
+        style: 'font-size:14px; padding:6px 12px'
+      });
+      
+      const opGroups = {
+        'Unary': ['sqr','sqrt','log10','ln','exp','sin','cos','tan','asin','acos','atan','abs','neg'],
+        'Binary': ['add','sub','mul','div','mod','pow','min','max','atan2']
       };
-
-      const channelInput = el('input', {
-        type: 'number',
-        value: evt.channel || 0,
-        min: 0,
-        max: (evt.type === 'AO' ? 1 : 7),
-        step: 1,
-        style: 'width:60px'
+      Object.entries(opGroups).forEach(([group, ops]) => {
+        const optgroup = el('optgroup', {label: group});
+        ops.forEach(o => optgroup.append(el('option', {value: o}, o)));
+        opSelect.append(optgroup);
       });
-      channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
+      opSelect.value = op.operation || 'add';
+      opRow.append(el('label', {}, ['Operation: ', opSelect]));
+      card.append(opRow);
 
-      let valueControl;
-      let noNcControl = el('span', {}, '—');
+      // Input A
+      const inputASection = el('div', {style: 'border:1px solid #2a3046; padding:8px; margin-bottom:8px; border-radius:6px'});
+      inputASection.append(el('h4', {style: 'margin:0 0 8px 0; color:#a8b3cf'}, 'Input A'));
+      inputASection.append(createMathInputEditor(op.input_a));
+      card.append(inputASection);
 
-      if (evt.type === 'DO' || !evt.type) {
-        const stateCheck = el('input', {
-          type: 'checkbox',
-          checked: !!evt.state
-        });
-        stateCheck.onchange = () => evt.state = stateCheck.checked;
-        valueControl = el('label', {style: 'display:flex;align-items:center;gap:4px'}, [
-          stateCheck,
-          el('span', {}, 'ON')
-        ]);
-
-        const noRadio = el('input', {
-          type: 'radio',
-          name: `nonc_${idx}`,
-          value: 'NO',
-          checked: evt.normallyOpen !== false
-        });
-        const ncRadio = el('input', {
-          type: 'radio',
-          name: `nonc_${idx}`,
-          value: 'NC',
-          checked: evt.normallyOpen === false
-        });
-        noRadio.onchange = () => evt.normallyOpen = true;
-        ncRadio.onchange = () => evt.normallyOpen = false;
-
-        noNcControl = el('div', {style: 'display:flex;gap:8px;align-items:center'}, [
-          el('label', {style: 'display:flex;gap:4px'}, [noRadio, 'NO']),
-          el('label', {style: 'display:flex;gap:4px'}, [ncRadio, 'NC'])
-        ]);
-      } else {
-        const voltInput = el('input', {
-          type: 'number',
-          value: evt.value || 0,
-          step: 0.01,
-          min: 0,
-          max: 10,
-          style: 'width:80px'
-        });
-        voltInput.oninput = () => evt.value = parseFloat(voltInput.value) || 0;
-        valueControl = el('div', {style: 'display:flex;align-items:center;gap:4px'}, [
-          voltInput,
-          el('span', {}, 'V')
-        ]);
+      // Input B (only for binary ops)
+      const binary = ['add','sub','mul','div','mod','pow','min','max','atan2'];
+      if (binary.includes(op.operation)) {
+        const inputBSection = el('div', {style: 'border:1px solid #2a3046; padding:8px; border-radius:6px'});
+        inputBSection.append(el('h4', {style: 'margin:0 0 8px 0; color:#a8b3cf'}, 'Input B'));
+        inputBSection.append(createMathInputEditor(op.input_b));
+        card.append(inputBSection);
       }
 
-      const deleteBtn = el('button', {
-        type: 'button',
-        className: 'btn danger',
-        onclick: () => {
-          events.splice(idx, 1);
-          renderEvents();
-        }
-      }, '×');
-
-      const upBtn = el('button', {
-        type: 'button',
-        className: 'btn',
-        onclick: () => {
-          if (idx > 0) {
-            [events[idx], events[idx-1]] = [events[idx-1], events[idx]];
-            renderEvents();
-          }
-        },
-        disabled: idx === 0
-      }, '↑');
-
-      const downBtn = el('button', {
-        type: 'button',
-        className: 'btn',
-        onclick: () => {
-          if (idx < events.length - 1) {
-            [events[idx], events[idx+1]] = [events[idx+1], events[idx]];
-            renderEvents();
-          }
-        },
-        disabled: idx === events.length - 1
-      }, '↓');
-
-      const tr = el('tr', {}, [
-        el('td', {}, timeInput),
-        el('td', {}, durationInput),
-        el('td', {}, typeSelect),
-        el('td', {}, channelInput),
-        el('td', {}, valueControl),
-        el('td', {}, noNcControl),
-        el('td', {style: 'display:flex;gap:4px'}, [upBtn, downBtn, deleteBtn])
-      ]);
-
-      tbody.append(tr);
+      container.append(card);
     });
   }
 
-  renderEvents();
-  table.append(thead, tbody);
+  function createMathInputEditor(input) {
+    const div = el('div', {className: 'row'});
+    
+    const kindSelect = el('select', {
+      onchange: e => {
+        input.kind = e.target.value;
+        // Show/hide value input based on kind
+        if (e.target.value === 'value') {
+          indexInput.style.display = 'none';
+          indexLabel.style.display = 'none';
+          valueInput.style.display = 'block';
+          valueLabel.style.display = 'flex';
+        } else {
+          indexInput.style.display = 'block';
+          indexLabel.style.display = 'flex';
+          valueInput.style.display = 'none';
+          valueLabel.style.display = 'none';
+        }
+      },
+      style: 'flex:1'
+    });
+    ['ai', 'ao', 'tc', 'pid_u', 'math', 'value'].forEach(k => {
+      kindSelect.append(el('option', {value: k}, k.toUpperCase()));
+    });
+    kindSelect.value = input.kind || 'ai';
+    
+    const indexInput = el('input', {
+      type: 'number',
+      min: 0,
+      step: 1,
+      value: input.index || 0,
+      oninput: e => input.index = parseInt(e.target.value) || 0,
+      style: 'flex:1'
+    });
+    
+    const valueInput = el('input', {
+      type: 'number',
+      step: 'any',
+      value: input.value || 0,
+      oninput: e => input.value = parseFloat(e.target.value) || 0,
+      style: 'flex:1; display:' + (input.kind === 'value' ? 'block' : 'none')
+    });
+    
+    const indexLabel = el('label', {style: 'flex:1; display:' + (input.kind === 'value' ? 'none' : 'flex')}, ['Index: ', indexInput]);
+    const valueLabel = el('label', {style: 'flex:1; display:' + (input.kind === 'value' ? 'flex' : 'none')}, ['Value: ', valueInput]);
+    
+    div.append(
+      el('label', {style: 'flex:1'}, ['Kind: ', kindSelect]),
+      indexLabel,
+      valueLabel
+    );
+    
+    return div;
+  }
 
-  const addBtn = el('button', {
-    className: 'btn',
-    onclick: () => {
-      events.push({
-        time: 0,
-        duration: 0,
-        type: 'DO',
-        channel: 0,
-        state: false,
-        normallyOpen: true
-      });
-      renderEvents();
-    }
-  }, '+ Add Event');
-
-  const sortBtn = el('button', {
-    className: 'btn',
-    onclick: () => {
-      events.sort((a, b) => (a.time || 0) - (b.time || 0));
-      renderEvents();
-    },
-    style: 'margin-left:8px'
-  }, 'Sort by Time');
+  renderMathEditor();
 
   const saveBtn = el('button', {
     className: 'btn',
     onclick: async () => {
       try {
-        await fetch('/api/script', {
+        const resp = await fetch('/api/math_operators', {
           method: 'PUT',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({events})
+          body: JSON.stringify(math_data)
         });
-        alert('Script saved successfully');
-        loadScript(); // Reload for script player
+        const result = await resp.json();
+        if (result.ok) {
+          alert('Math operators saved!');
+          closeModal();
+        } else {
+          alert('Failed to save: ' + result.error);
+        }
       } catch(e) {
-        alert('Save failed: ' + e.message);
+        alert('Network error: ' + e.message);
       }
-    },
-    style: 'margin-left:8px'
-  }, 'Save');
+    }
+  }, '💾 Save');
+
+  const downloadBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      const blob = new Blob([JSON.stringify(math_data, null, 2)], {type: 'application/json'});
+      const a = el('a', {href: URL.createObjectURL(blob), download: 'math_operators.json'});
+      a.click();
+    }
+  }, '⬇ Download JSON');
 
   root.append(
     title,
-    el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn]),
-    el('div', {style: 'margin:12px 0'}, [
-      el('p', {}, 'Define timed events for automated control. Time is in seconds from script start.'),
-      el('p', {style: 'font-size:12px;color:var(--muted)'},
-        'Duration: How long the output stays in this state (0 = instantaneous toggle)')
-    ]),
-    table,
-    el('div', {style: 'margin-top:12px;display:flex;gap:8px'}, [addBtn, sortBtn, saveBtn])
+    el('div', {className: 'row', style: 'gap:8px;margin:12px 0'}, [loadBtn, addUnaryBtn, addBinaryBtn]),
+    container,
+    el('div', {className: 'row', style: 'gap:8px;margin-top:20px'}, [saveBtn, downloadBtn])
   );
 
   showModal(root);
 }
 
-/* ----------------------------- form bits -------------------------------- */
-function fieldset(title, inner){ const fs=el('fieldset',{}); fs.append(el('legend',{},title), inner); return fs; }
-function tableForm(pairs){
-  const tbl=el('table',{className:'form'}), tbody=el('tbody');
-  for(const [label,input] of pairs){ const tr=el('tr'); tr.append(el('th',{},label), el('td',{},input)); tbody.append(tr); }
-  tbl.append(el('thead',{}, el('tr',{},[el('th',{},'Field'), el('th',{},'Value')])), tbody);
-  return tbl;
-}
-function tableFormRows(rows){
-  const tbl=el('table',{className:'form'}), tbody=el('tbody');
-  for(const row of rows){
-    const tr=el('tr');
-    for(let i=0;i<row.length;i+=2){ tr.append(el('th',{},row[i]), el('td',{},row[i+1])); }
-    tbody.append(tr);
-  }
-  tbl.append(el('thead',{}, el('tr',{},[
-    el('th',{},'Field'), el('th',{},'Value'),
-    el('th',{},'Field'), el('th',{},'Value'),
-    el('th',{},'Field'), el('th',{},'Value'),
-    el('th',{},'Field'), el('th',{},'Value')
-  ])), tbody);
-  return tbl;
-}
-function inputText(obj,key){ const i=el('input',{type:'text',value:obj[key]??''}); i.oninput=()=>obj[key]=i.value; return i; }
-function inputNum(obj,key,step){ const i=el('input',{type:'number',step:step??'any',value:obj[key]??0}); i.oninput=()=>obj[key]=parseFloat(i.value)||0; return i; }
-function inputChk(obj,key){ const i=el('input',{type:'checkbox',checked:!!obj[key]}); i.onchange=()=>obj[key]=!!i.checked; return i; }
-function selectEnum(options, value, onChange){ const s=el('select',{}); options.forEach(opt=>s.append(el('option',{value:opt},opt))); s.value=value; s.onchange=()=>onChange(s.value); return s; }
+async function openScriptEditor() {
+  async function openMathEditor() {
+    const math_data = await (await fetch('/api/math_operators')).json();
+    const operators = math_data.operators || [];
 
-function saveLayoutToFile(){
-  const blob=new Blob([JSON.stringify({pages:state.pages},null,2)],{type:'application/json'});
-  const a=el('a',{href:URL.createObjectURL(blob),download:'layout.json'}); a.click();
-}
-function loadLayoutFromFile(){
-  const inp=el('input',{type:'file',accept:'.json'});
-  inp.onchange=()=>{
-    const f=inp.files?.[0]; if(!f) return;
-    const rd=new FileReader();
-    rd.onload=()=>{
-      try{
-        const obj=JSON.parse(rd.result);
-        if(!obj.pages||!Array.isArray(obj.pages)) throw new Error('Invalid layout file');
-        state.pages = normalizeLayoutPages(obj.pages);   // <-- ensure defaults exist
-        refreshPages();
-        setActivePage(0);
-      }catch(e){ alert('Load failed: '+e.message); }
-    };
-    rd.readAsText(f);
-  };
-  inp.click();
-}
+    const root = el('div', {});
+    const title = el('h2', {}, 'Math Operators Editor');
 
-/* ----------------------- widget settings modal -------------------------- */
-function openWidgetSettings(w){
-  const root=el('div',{});
-  const titleHeader=el('h3',{}, (w.opts.title||w.type)+' — Settings');
-  const titleInput=inputText(w.opts,'title');
-  titleInput.oninput = ()=>{
-    w.opts.title = titleInput.value;
-    const t=document.querySelector('#w_'+w.id+' header .title'); if(t) t.textContent = w.opts.title || w.type;
-    const b=document.querySelector('#w_'+w.id+' .do-btn'); if(b) b.textContent = w.opts.title || 'DO';
-  };
-  const nameRow=tableForm([['Title', titleInput]]);
-  root.append(el('div',{},[titleHeader]), nameRow, el('hr',{className:'soft'}));
+    const loadBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        const inp = el('input', {type: 'file', accept: '.json'});
+        inp.onchange = async () => {
+          const f = inp.files?.[0];
+          if (!f) return;
+          try {
+            const text = await f.text();
+            const loaded = JSON.parse(text);
+            Object.assign(math_data, loaded);
+            alert('Math config loaded! Close and reopen to see changes, or click Save to apply.');
+          } catch (e) {
+            alert('Failed to load Math config: ' + e.message);
+          }
+        };
+        inp.click();
+      }
+    }, '📁 Load from File');
 
-  if (w.type==='chart'||w.type==='bars'||w.type==='gauge'){
-    const list=el('div',{});
-    const items=(w.type==='gauge')?(w.opts.needles=w.opts.needles||[]):(w.opts.series=w.opts.series||[]);
-    function redrawList(){
-      list.innerHTML='';
-      items.forEach((s,idx)=>{
-        // Ensure display scale/offset exist
-        s.displayScale = s.displayScale !== undefined ? s.displayScale : 1.0;
-        s.displayOffset = s.displayOffset !== undefined ? s.displayOffset : 0.0;
-        
-        const kindSel=selectEnum(['ai','ao','do','tc','pid'], s.kind||'ai', v=>{ s.kind=v; s.name = s.name || labelFor(s); });
-        const idxInput=el('input',{type:'number',min:0,step:1,value:s.index|0,style:'width:60px'});
-        idxInput.onchange=()=>{ s.index=parseInt(idxInput.value)||0; s.name = s.name || labelFor(s); };
-        const nameInput=el('input',{type:'text',value:(s.name && s.name.length)? s.name : labelFor(s),placeholder:'label',style:'width:80px'});
-        nameInput.oninput=()=>s.name=nameInput.value;
-        
-        // Display scaling inputs
-        const scaleInput=el('input',{type:'number',step:'any',value:s.displayScale,style:'width:60px',title:'Display Scale (multiplier)'});
-        scaleInput.oninput=()=>s.displayScale=parseFloat(scaleInput.value)||1.0;
-        const offsetInput=el('input',{type:'number',step:'any',value:s.displayOffset,style:'width:60px',title:'Display Offset (added after scale)'});
-        offsetInput.oninput=()=>s.displayOffset=parseFloat(offsetInput.value)||0.0;
-        
-        const rm=el('span',{className:'icon',onclick:()=>{ items.splice(idx,1); redrawList(); }}, '−');
-        
-        const row = el('div',{style:'display:flex;gap:4px;align-items:center;margin:4px 0;flex-wrap:wrap'},[
-          el('span',{style:'min-width:40px;font-size:11px;color:var(--muted)'},'Kind:'),
-          kindSel,
-          el('span',{style:'min-width:30px;font-size:11px;color:var(--muted)'},'Ch:'),
-          idxInput,
-          el('span',{style:'min-width:40px;font-size:11px;color:var(--muted)'},'Name:'),
-          nameInput,
-          el('br',{}),
-          el('span',{style:'min-width:40px;font-size:11px;color:var(--muted)'},'Scale:'),
-          scaleInput,
-          el('span',{style:'min-width:45px;font-size:11px;color:var(--muted)'},'Offset:'),
-          offsetInput,
-          rm
-        ]);
-        list.append(row);
+    const addUnaryBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        operators.push({
+          enabled: true,
+          name: `Math${operators.length}`,
+          operation: 'sqr',
+          input_a: {kind: 'ai', index: 0}
+        });
+        renderMathEditor();
+      }
+    }, '+ Add Unary (sqr, sqrt, etc)');
+
+    const addBinaryBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        operators.push({
+          enabled: true,
+          name: `Math${operators.length}`,
+          operation: 'add',
+          input_a: {kind: 'ai', index: 0},
+          input_b: {kind: 'ai', index: 1}
+        });
+        renderMathEditor();
+      }
+    }, '+ Add Binary (+, -, ×, ÷)');
+
+    const container = el('div', {style: 'overflow:auto;max-height:60vh'});
+
+    function renderMathEditor() {
+      container.innerHTML = '';
+
+      operators.forEach((op, idx) => {
+        const card = el('fieldset', {style: 'margin-bottom:20px; padding:12px;'});
+        const legend = el('legend', {}, `Math${idx}: ${op.name}`);
+        card.append(legend);
+
+        const topRow = el('div', {className: 'row', style: 'margin-bottom:12px'});
+        topRow.append(
+            el('label', {}, [
+              el('input', {type: 'checkbox', checked: op.enabled, onchange: e => op.enabled = e.target.checked}),
+              ' Enabled'
+            ]),
+            el('label', {style: 'flex:2'}, [
+              'Name: ',
+              el('input', {type: 'text', value: op.name, oninput: e => op.name = e.target.value, style: 'width:100%'})
+            ]),
+            el('button', {
+              className: 'btn danger',
+              onclick: () => {
+                if (confirm(`Delete Math${idx}?`)) {
+                  operators.splice(idx, 1);
+                  renderMathEditor();
+                }
+              }
+            }, '🗑 Delete')
+        );
+        card.append(topRow);
+
+        // Operation select
+        const opRow = el('div', {style: 'margin:12px 0'});
+        const opSelect = el('select', {
+          onchange: e => {
+            op.operation = e.target.value;
+            // Binary ops need input_b, unary don't
+            const binary = ['add', 'sub', 'mul', 'div', 'mod', 'pow', 'min', 'max', 'atan2'];
+            if (binary.includes(e.target.value)) {
+              if (!op.input_b) op.input_b = {kind: 'ai', index: 1};
+            } else {
+              delete op.input_b;
+            }
+            renderMathEditor();
+          },
+          style: 'font-size:14px; padding:6px 12px'
+        });
+
+        const opGroups = {
+          'Unary': ['sqr', 'sqrt', 'log10', 'ln', 'exp', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'abs', 'neg'],
+          'Binary': ['add', 'sub', 'mul', 'div', 'mod', 'pow', 'min', 'max', 'atan2']
+        };
+        Object.entries(opGroups).forEach(([group, ops]) => {
+          const optgroup = el('optgroup', {label: group});
+          ops.forEach(o => optgroup.append(el('option', {value: o}, o)));
+          opSelect.append(optgroup);
+        });
+        opSelect.value = op.operation || 'add';
+        opRow.append(el('label', {}, ['Operation: ', opSelect]));
+        card.append(opRow);
+
+        // Input A
+        const inputASection = el('div', {style: 'border:1px solid #2a3046; padding:8px; margin-bottom:8px; border-radius:6px'});
+        inputASection.append(el('h4', {style: 'margin:0 0 8px 0; color:#a8b3cf'}, 'Input A'));
+        inputASection.append(createMathInputEditor(op.input_a));
+        card.append(inputASection);
+
+        // Input B (only for binary ops)
+        const binary = ['add', 'sub', 'mul', 'div', 'mod', 'pow', 'min', 'max', 'atan2'];
+        if (binary.includes(op.operation)) {
+          const inputBSection = el('div', {style: 'border:1px solid #2a3046; padding:8px; border-radius:6px'});
+          inputBSection.append(el('h4', {style: 'margin:0 0 8px 0; color:#a8b3cf'}, 'Input B'));
+          inputBSection.append(createMathInputEditor(op.input_b));
+          card.append(inputBSection);
+        }
+
+        container.append(card);
       });
     }
-    const add=el('span',{className:'icon',onclick:()=>{ const s={kind:'ai',index:0,name: labelFor({kind:'ai',index:0}),displayScale:1.0,displayOffset:0.0}; items.push(s); redrawList(); }}, '+ Add');
-    redrawList();
-    root.append(el('h4',{}, (w.type==='gauge'?'Needles':'Series')), list, el('div',{style:'margin-top:8px'}, add));
+
+    function createMathInputEditor(input) {
+      const div = el('div', {className: 'row'});
+
+      const kindSelect = el('select', {
+        onchange: e => input.kind = e.target.value,
+        style: 'flex:1'
+      });
+      ['ai', 'ao', 'tc', 'pid_u', 'math'].forEach(k => {
+        kindSelect.append(el('option', {value: k}, k.toUpperCase()));
+      });
+      kindSelect.value = input.kind || 'ai';
+
+      const indexInput = el('input', {
+        type: 'number',
+        min: 0,
+        step: 1,
+        value: input.index || 0,
+        oninput: e => input.index = parseInt(e.target.value) || 0,
+        style: 'flex:1'
+      });
+
+      div.append(
+          el('label', {style: 'flex:1'}, ['Kind: ', kindSelect]),
+          el('label', {style: 'flex:1'}, ['Index: ', indexInput])
+      );
+
+      return div;
+    }
+
+    renderMathEditor();
+
+    const saveBtn = el('button', {
+      className: 'btn',
+      onclick: async () => {
+        try {
+          const resp = await fetch('/api/math_operators', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(math_data)
+          });
+          const result = await resp.json();
+          if (result.ok) {
+            alert('Math operators saved!');
+            closeModal();
+          } else {
+            alert('Failed to save: ' + result.error);
+          }
+        } catch (e) {
+          alert('Network error: ' + e.message);
+        }
+      }
+    }, '💾 Save');
+
+    const downloadBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        const blob = new Blob([JSON.stringify(math_data, null, 2)], {type: 'application/json'});
+        const a = el('a', {href: URL.createObjectURL(blob), download: 'math_operators.json'});
+        a.click();
+      }
+    }, '⬇ Download JSON');
+
+    root.append(
+        title,
+        el('div', {className: 'row', style: 'gap:8px;margin:12px 0'}, [loadBtn, addUnaryBtn, addBinaryBtn]),
+        container,
+        el('div', {className: 'row', style: 'gap:8px;margin-top:20px'}, [saveBtn, downloadBtn])
+    );
+
+    showModal(root);
   }
 
-  if (w.type==='dobutton'){
-    const modeSel=selectEnum(['toggle','momentary','buzz'], w.opts.mode||'toggle', v=>w.opts.mode=v);
-    root.append(tableForm([
-      ['Title', titleInput],
-      ['Index', inputNum(w.opts,'doIndex',1)],      ['Active High', inputChk(w.opts,'activeHigh')],
-      ['Mode', modeSel],                             ['Buzz Hz', inputNum(w.opts,'buzzHz',10)],
-      ['Actuation Time (s, toggle)', inputNum(w.opts,'actuationTime',0.01)]
+  async function openScriptEditor() {
+    const script = await (await fetch('/api/script')).json();
+    const events = script.events || [];
+
+    const root = el('div', {});
+    const title = el('h2', {}, 'Script Editor');
+
+    // Add Load from File button
+    const loadBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        const inp = el('input', {type: 'file', accept: '.json'});
+        inp.onchange = async () => {
+          const f = inp.files?.[0];
+          if (!f) return;
+          try {
+            const text = await f.text();
+            const loaded = JSON.parse(text);
+            // Clear and reload events
+            events.length = 0;
+            const loadedEvents = loaded.events || (Array.isArray(loaded) ? loaded : []);
+            events.push(...loadedEvents);
+            renderEvents();
+            alert(`Loaded ${events.length} events`);
+          } catch (e) {
+            alert('Failed to load script: ' + e.message);
+          }
+        };
+        inp.click();
+      }
+    }, '📁 Load from File');
+
+    const table = el('table', {className: 'form script-table'});
+    const thead = el('thead', {}, el('tr', {}, [
+      el('th', {}, 'Time (s)'),
+      el('th', {}, 'Duration (s)'),
+      el('th', {}, 'Type'),
+      el('th', {}, 'Channel'),
+      el('th', {}, 'Value/State'),
+      el('th', {}, 'NO/NC'),
+      el('th', {}, 'Actions')
     ]));
-  }
+    const tbody = el('tbody', {});
 
-  if (w.type==='aoslider'){
-    const minI = inputNum(w.opts,'min',0.001);
-    const maxI = inputNum(w.opts,'max',0.001);
-    const stepI = inputNum(w.opts,'step',0.0001);
-    const applyAOdom = ()=>{
-      const node=document.querySelector('#w_'+w.id);
-      if(!node) return;
-      const rng=node.querySelector('input[type="range"]');
-      const cur=node.querySelector('input[type="number"]');
-      if(rng){ rng.min=w.opts.min; rng.max=w.opts.max; rng.step=w.opts.step; }
-      if(cur){ cur.min=w.opts.min; cur.max=w.opts.max; cur.step=w.opts.step; }
-      const hdr=node.querySelector('header .title'); if(hdr) hdr.textContent=w.opts.title||'AO';
-    };
-    minI.oninput = ()=>{ w.opts.min=parseFloat(minI.value)||0;  applyAOdom(); };
-    maxI.oninput = ()=>{ w.opts.max=parseFloat(maxI.value)||10; applyAOdom(); };
-    stepI.oninput= ()=>{ w.opts.step=parseFloat(stepI.value)||0.0001; applyAOdom(); };
-
-    root.append(tableForm([
-      ['Title', titleInput],
-      ['AO Index', inputNum(w.opts,'aoIndex',1)],
-      ['Min V', minI],
-      ['Max V', maxI],
-      ['Step V', stepI],
-      ['Live (send on move)', inputChk(w.opts,'live')]
-    ]));
-  }
-
-  if (w.type==='pidpanel'){
-    // Async load PID loops for dropdown
-    (async () => {
-      try {
-        const pid = await (await fetch('/api/pid')).json();
-        const loops = pid.loops || [];
-        
-        const loopSelector = el('select', {});
-        loops.forEach((loop, idx) => {
-          const name = loop.name || `Loop ${idx}`;
-          const enabled = loop.enabled ? '✓' : '✗';
-          loopSelector.append(el('option', {value: idx}, `${name} (${enabled})`));
+    function renderEvents() {
+      tbody.innerHTML = '';
+      events.forEach((evt, idx) => {
+        const timeInput = el('input', {
+          type: 'number',
+          value: evt.time || 0,
+          step: 0.1,
+          min: 0,
+          style: 'width:80px'
         });
-        loopSelector.value = w.opts.loopIndex || 0;
-        loopSelector.onchange = () => {
-          w.opts.loopIndex = parseInt(loopSelector.value);
-          renderPage();
-        };
-        
-        root.append(tableForm([
-          ['Loop', loopSelector],
-          ['Show Controls', inputChk(w.opts,'showControls')]
-        ]));
-      } catch(e) {
-        root.append(tableForm([
-          ['Loop Index', inputNum(w.opts,'loopIndex',1)],
-          ['Show Controls', inputChk(w.opts,'showControls')]
-        ]));
-      }
-    })();
-  }
+        timeInput.oninput = () => evt.time = parseFloat(timeInput.value) || 0;
 
-  if (w.type==='motor'){
-    // Async load motors for dropdown
-    (async () => {
-      try {
-        const motorData = await (await fetch('/api/motors')).json();
-        const motors = motorData.motors || [];
-        
-        const motorSelector = el('select', {});
-        motors.forEach((m, i) => {
-          const included = m.include ? '✓' : '✗';
-          motorSelector.append(el('option', {value: i}, `${m.name || `Motor ${i}`} (${included})`));
+        const durationInput = el('input', {
+          type: 'number',
+          value: evt.duration || 0,
+          step: 0.1,
+          min: 0,
+          style: 'width:80px'
         });
-        motorSelector.value = w.opts.motorIndex || 0;
-        motorSelector.onchange = () => {
-          w.opts.motorIndex = parseInt(motorSelector.value);
-          renderPage();
-        };
-        
-        root.append(tableForm([
-          ['Motor', motorSelector],
-          ['Show Controls', inputChk(w.opts,'showControls')]
-        ]));
-      } catch(e) {
-        root.append(tableForm([
-          ['Motor Index', inputNum(w.opts,'motorIndex',1)],
-          ['Show Controls', inputChk(w.opts,'showControls')]
-        ]));
-      }
-    })();
-  }
+        durationInput.oninput = () => evt.duration = parseFloat(durationInput.value) || 0;
 
-  if (w.type==='le'){
-    // Async load LEs for dropdown
-    (async () => {
-      try {
-        const leData = await (await fetch('/api/logic_elements')).json();
-        const elements = leData.elements || [];
-        
-        const leSelector = el('select', {});
-        elements.forEach((le, i) => {
-          const name = le.name || `LE${i}`;
-          const op = (le.operation || 'and').toUpperCase();
-          leSelector.append(el('option', {value: i}, `${name} (${op})`));
+        const typeSelect = el('select', {style: 'width:80px'}, [
+          el('option', {value: 'DO'}, 'DO'),
+          el('option', {value: 'AO'}, 'AO')
+        ]);
+        typeSelect.value = evt.type || 'DO';
+        typeSelect.onchange = () => {
+          evt.type = typeSelect.value;
+          renderEvents();
+        };
+
+        const channelInput = el('input', {
+          type: 'number',
+          value: evt.channel || 0,
+          min: 0,
+          max: (evt.type === 'AO' ? 1 : 7),
+          step: 1,
+          style: 'width:60px'
         });
-        leSelector.value = w.opts.leIndex || 0;
-        leSelector.onchange = () => {
-          w.opts.leIndex = parseInt(leSelector.value);
-          renderPage();
-        };
-        
-        root.append(tableForm([
-          ['Logic Element', leSelector],
-          ['Show Inputs', inputChk(w.opts,'showInputs')]
-        ]));
-      } catch(e) {
-        root.append(tableForm([
-          ['LE Index', inputNum(w.opts,'leIndex',1)],
-          ['Show Inputs', inputChk(w.opts,'showInputs')]
-        ]));
+        channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
+
+        let valueControl;
+        let noNcControl = el('span', {}, '—');
+
+        if (evt.type === 'DO' || !evt.type) {
+          const stateCheck = el('input', {
+            type: 'checkbox',
+            checked: !!evt.state
+          });
+          stateCheck.onchange = () => evt.state = stateCheck.checked;
+          valueControl = el('label', {style: 'display:flex;align-items:center;gap:4px'}, [
+            stateCheck,
+            el('span', {}, 'ON')
+          ]);
+
+          const noRadio = el('input', {
+            type: 'radio',
+            name: `nonc_${idx}`,
+            value: 'NO',
+            checked: evt.normallyOpen !== false
+          });
+          const ncRadio = el('input', {
+            type: 'radio',
+            name: `nonc_${idx}`,
+            value: 'NC',
+            checked: evt.normallyOpen === false
+          });
+          noRadio.onchange = () => evt.normallyOpen = true;
+          ncRadio.onchange = () => evt.normallyOpen = false;
+
+          noNcControl = el('div', {style: 'display:flex;gap:8px;align-items:center'}, [
+            el('label', {style: 'display:flex;gap:4px'}, [noRadio, 'NO']),
+            el('label', {style: 'display:flex;gap:4px'}, [ncRadio, 'NC'])
+          ]);
+        } else {
+          const voltInput = el('input', {
+            type: 'number',
+            value: evt.value || 0,
+            step: 0.01,
+            min: 0,
+            max: 10,
+            style: 'width:80px'
+          });
+          voltInput.oninput = () => evt.value = parseFloat(voltInput.value) || 0;
+          valueControl = el('div', {style: 'display:flex;align-items:center;gap:4px'}, [
+            voltInput,
+            el('span', {}, 'V')
+          ]);
+        }
+
+        const deleteBtn = el('button', {
+          type: 'button',
+          className: 'btn danger',
+          onclick: () => {
+            events.splice(idx, 1);
+            renderEvents();
+          }
+        }, '×');
+
+        const upBtn = el('button', {
+          type: 'button',
+          className: 'btn',
+          onclick: () => {
+            if (idx > 0) {
+              [events[idx], events[idx - 1]] = [events[idx - 1], events[idx]];
+              renderEvents();
+            }
+          },
+          disabled: idx === 0
+        }, '↑');
+
+        const downBtn = el('button', {
+          type: 'button',
+          className: 'btn',
+          onclick: () => {
+            if (idx < events.length - 1) {
+              [events[idx], events[idx + 1]] = [events[idx + 1], events[idx]];
+              renderEvents();
+            }
+          },
+          disabled: idx === events.length - 1
+        }, '↓');
+
+        const tr = el('tr', {}, [
+          el('td', {}, timeInput),
+          el('td', {}, durationInput),
+          el('td', {}, typeSelect),
+          el('td', {}, channelInput),
+          el('td', {}, valueControl),
+          el('td', {}, noNcControl),
+          el('td', {style: 'display:flex;gap:4px'}, [upBtn, downBtn, deleteBtn])
+        ]);
+
+        tbody.append(tr);
+      });
+    }
+
+    renderEvents();
+    table.append(thead, tbody);
+
+    const addBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        events.push({
+          time: 0,
+          duration: 0,
+          type: 'DO',
+          channel: 0,
+          state: false,
+          normallyOpen: true
+        });
+        renderEvents();
       }
-    })();
+    }, '+ Add Event');
+
+    const sortBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        events.sort((a, b) => (a.time || 0) - (b.time || 0));
+        renderEvents();
+      },
+      style: 'margin-left:8px'
+    }, 'Sort by Time');
+
+    const saveBtn = el('button', {
+      className: 'btn',
+      onclick: async () => {
+        try {
+          await fetch('/api/script', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({events})
+          });
+          alert('Script saved successfully');
+          loadScript(); // Reload for script player
+        } catch (e) {
+          alert('Save failed: ' + e.message);
+        }
+      },
+      style: 'margin-left:8px'
+    }, 'Save');
+
+    root.append(
+        title,
+        el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn]),
+        el('div', {style: 'margin:12px 0'}, [
+          el('p', {}, 'Define timed events for automated control. Time is in seconds from script start.'),
+          el('p', {style: 'font-size:12px;color:var(--muted)'},
+              'Duration: How long the output stays in this state (0 = instantaneous toggle)')
+        ]),
+        table,
+        el('div', {style: 'margin-top:12px;display:flex;gap:8px'}, [addBtn, sortBtn, saveBtn])
+    );
+
+    showModal(root);
   }
 
-  showModal(root, ()=>{ renderPage(); });
+}
+
+/* ----------------------------- form bits -------------------------------- */
+function fieldset(title, inner) {
+  const fs = el('fieldset', {});
+  fs.append(el('legend', {}, title), inner);
+  return fs;
 }

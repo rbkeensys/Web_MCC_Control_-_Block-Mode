@@ -15,7 +15,7 @@
       "name": "Pressure",
       "slope": 250.0,
       "offset": -123.2,
-      "cutoffHz": 0.5,
+      "cutoffHz": 0.05,
       "units": "psi",
       "include": true
     },
@@ -171,7 +171,7 @@
       "name": "TC0",
       "type": "T",
       "offset": 0.0,
-      "cutoffHz": 0.51
+      "cutoffHz": 0.1
     },
     {
       "include": true,
@@ -179,7 +179,7 @@
       "name": "TC1",
       "type": "T",
       "offset": 0.0,
-      "cutoffHz": 0.51
+      "cutoffHz": 0.1
     },
     {
       "include": true,
@@ -187,7 +187,7 @@
       "name": "TC2",
       "type": "T",
       "offset": 0.0,
-      "cutoffHz": 0.51
+      "cutoffHz": 0.1
     },
     {
       "include": true,
@@ -195,7 +195,7 @@
       "name": "TC3",
       "type": "T",
       "offset": 0.0,
-      "cutoffHz": 0.51
+      "cutoffHz": 0.1
     },
     {
       "include": true,
@@ -203,7 +203,7 @@
       "name": "TC4",
       "type": "T",
       "offset": 0.0,
-      "cutoffHz": 0.51
+      "cutoffHz": 0.1
     },
     {
       "include": false,
@@ -211,7 +211,7 @@
       "name": "TC5",
       "type": "K",
       "offset": 0.0,
-      "cutoffHz": 0.25
+      "cutoffHz": 0.1
     },
     {
       "include": false,
@@ -219,7 +219,7 @@
       "name": "TC6",
       "type": "K",
       "offset": 0.0,
-      "cutoffHz": 0.0
+      "cutoffHz": 0.1
     },
     {
       "include": true,
@@ -227,7 +227,7 @@
       "name": "TC7",
       "type": "K",
       "offset": 0.0,
-      "cutoffHz": 0.0
+      "cutoffHz": 0.1
     }
   ]
 }

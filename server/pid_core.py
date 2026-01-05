@@ -30,7 +30,7 @@ class _PID:
         self.i = 0.0
         self.prev = None
 
-    def step(self, pv: float, dt: float) -> float:
+    def step(self, pv: float, dt: float):
         e = self.d.target - pv
         if self.d.err_min is not None: e = max(self.d.err_min, e)
         if self.d.err_max is not None: e = min(self.d.err_max, e)
@@ -43,7 +43,7 @@ class _PID:
             d = self.d.kd * (e - self.prev) / max(1e-6, dt)
         self.prev = e
         u = p + self.i + d
-        return u, e
+        return u, e, p, self.i, d  # Return u, error, p_term, i_term, d_term
 
 class PIDManager:
     def __init__(self):
@@ -89,9 +89,19 @@ class PIDManager:
         tel = []
         for i, (p, d) in enumerate(zip(self.loops, self.meta)):
             if not d.enabled:
-                # PID disabled via checkbox - reset state
+                # PID disabled via checkbox - reset state and force outputs to safe state
                 p.i = 0.0
                 p.prev = None
+                
+                # Force outputs to safe state based on kind
+                if d.kind == "digital":
+                    bridge.set_do(d.out_ch, False, active_high=True)  # Force to 0
+                elif d.kind == "analog":
+                    # Force to minimum (typically 0V)
+                    min_val = -10.0 if d.out_min is None else d.out_min
+                    bridge.set_ao(d.out_ch, min_val)
+                # var kind doesn't write to hardware
+                
                 # Add placeholder telemetry for disabled loops to maintain indexing
                 tel.append({"name": d.name, "pv": 0.0, "u": 0.0, "out": 0.0, "err": 0.0, "enabled": False})
                 continue
@@ -151,7 +161,7 @@ class PIDManager:
                     # Use previous cycle's PID output (cascade control)
                     if d.ai_ch < len(pid_prev):
                         pv = pid_prev[d.ai_ch].get("out", 0.0)
-                u, err = p.step(pv, dt)
+                u, err, p_term, i_term, d_term = p.step(pv, dt)
                 
                 # Calculate output value
                 if d.kind == "digital":
@@ -170,7 +180,19 @@ class PIDManager:
                     bridge.set_ao(d.out_ch, ov)
                 # var kind never writes to hardware
                 
-                tel.append({"name": d.name, "pv": pv, "u": u, "out": ov, "err": err, "enabled": True, "gated": False})
+                tel.append({
+                    "name": d.name, 
+                    "pv": pv, 
+                    "u": u, 
+                    "out": ov, 
+                    "err": err, 
+                    "p_term": p_term,
+                    "i_term": i_term,
+                    "d_term": d_term,
+                    "target": d.target,
+                    "enabled": True, 
+                    "gated": False
+                })
             except Exception as e:
                 # Log error but continue with other PIDs
                 print(f"[PID] Loop '{d.name}' (kind={d.kind}) failed: {e}")

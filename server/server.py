@@ -18,9 +18,10 @@ from logger import SessionLogger
 from app_models import AppConfig, PIDFile, ScriptFile, MotorFile, default_config
 from motor_controller import MotorManager, list_serial_ports
 from logic_elements import LEManager
+from math_ops import MathOpManager, MathOpFile
 from app_models import LEFile, LogicElementCfg
 import logging, os
-SERVER_VERSION = "0.9.8"  # Fixed NaN to None conversion for JSON serialization
+SERVER_VERSION = "0.9.10"  # Fixed NaN to None conversion for TC and math telemetry
 
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
@@ -242,6 +243,10 @@ motor_mgr = MotorManager()
 # Logic Elements
 le_mgr = LEManager()
 LE_PATH = CFG_DIR / "logic_elements.json"
+MATH_PATH = CFG_DIR / "math_operators.json"
+
+# Math Operators
+math_mgr = MathOpManager()
 
 def load_le():
     global le_mgr
@@ -258,6 +263,23 @@ def load_le():
         LE_PATH.write_text(json.dumps({"elements": []}, indent=2))
 
 load_le()
+
+def load_math():
+    global math_mgr
+    if MATH_PATH.exists():
+        try:
+            data = json.loads(MATH_PATH.read_text())
+            math_file = MathOpFile.model_validate(data)
+            math_mgr.load(math_file)
+            log.info(f"[MathOps] Loaded {len(math_mgr.operators)} math operators")
+        except Exception as e:
+            log.error(f"[MathOps] Failed to load: {e}")
+            math_mgr = MathOpManager()
+    else:
+        log.info("[MathOps] No math_operators.json found, creating default")
+        MATH_PATH.write_text(json.dumps({"operators": []}, indent=2))
+
+load_math()
 
 # AO Enable Gate Tracking
 # Track desired values separately from what's actually written to hardware
@@ -456,6 +478,16 @@ async def acq_loop():
             })
             le_tel = le_mgr.get_telemetry()
 
+            # --- Math Operators ---
+            # Evaluate AFTER LEs but BEFORE PIDs so PIDs can use math outputs
+            math_tel = math_mgr.evaluate_all({
+                "ai": ai_scaled,
+                "ao": ao,
+                "tc": tc_vals,
+                "pid": [],  # PIDs haven't run yet
+                "le": le_outputs
+            })
+
             # --- PIDs (may drive DO/AO) ---
             # Pass DO/LE state so PIDs can check their enable gates
             # Pass previous cycle's PID telemetry for cascade control (pid source)
@@ -577,6 +609,18 @@ async def acq_loop():
             # (Python's json.dumps doesn't support NaN)
             import math
             tc_vals_json = [None if not math.isfinite(v) else v for v in tc_vals]
+            
+            # Also convert NaN in math telemetry
+            math_tel_json = []
+            for m in math_tel:
+                m_clean = m.copy()
+                if 'input_a' in m_clean and not math.isfinite(m_clean['input_a']):
+                    m_clean['input_a'] = None
+                if 'input_b' in m_clean and m_clean['input_b'] is not None and not math.isfinite(m_clean['input_b']):
+                    m_clean['input_b'] = None
+                if 'output' in m_clean and not math.isfinite(m_clean['output']):
+                    m_clean['output'] = None
+                math_tel_json.append(m_clean)
 
             frame = {
                 "type": "tick",
@@ -588,6 +632,7 @@ async def acq_loop():
                 "pid": telemetry,
                 "motors": motor_status,
                 "le": le_tel,
+                "math": math_tel_json,
             }
 
             ticks += 1
@@ -732,6 +777,26 @@ def put_logic_elements(data: LEFile):
     try:
         LE_PATH.write_text(json.dumps(data.dict(), indent=2))
         load_le()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+@app.get("/api/math_operators")
+def get_math_operators():
+    """Get math operator configuration"""
+    if MATH_PATH.exists():
+        try:
+            return json.loads(MATH_PATH.read_text())
+        except:
+            pass
+    return {"operators": []}
+
+@app.put("/api/math_operators")
+def put_math_operators(data: MathOpFile):
+    """Update math operator configuration"""
+    try:
+        MATH_PATH.write_text(json.dumps(data.model_dump(), indent=2))
+        load_math()
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
