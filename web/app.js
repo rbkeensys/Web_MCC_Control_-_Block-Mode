@@ -1,5 +1,5 @@
 // app.js – UI v0.9.4 - PART 1 OF 2
-const UI_VERSION = "0.13.6";  // Added per-series display scaling and offset
+const UI_VERSION = "0.13.7";  // LE widget shows 'X' for missing/invalid TC inputs
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2634,7 +2634,13 @@ function mountLEWidget(w, body){
         return {label: `AO${ch}`, val, detail};
       }
       else if (kind === 'tc') {
-        const rawVal = state.tc?.[ch] ?? 0;
+        const rawVal = state.tc?.[ch];
+        
+        // Check for null/undefined/NaN (missing TC)
+        if (rawVal === null || rawVal === undefined || !Number.isFinite(rawVal)) {
+          return {label: `TC${ch}`, val: 'X', detail: 'not detected', isInvalid: true};
+        }
+        
         const comp = inputCfg.comparison || 'gt';
         let compVal = 0;
         
@@ -2694,20 +2700,26 @@ function mountLEWidget(w, body){
     const output = le.output ? '1' : '0';
     const op = (leConfig.operation || 'and').toUpperCase();
     
+    // Helper to get color for input value
+    const getInputColor = (inp) => {
+      if (inp.val === 'X') return '#ff9e64'; // Orange for invalid
+      return inp.val === '1' ? '#2faa60' : '#d84a4a';
+    };
+    
     // Compact 5-box layout: [A][OP][B][=][OUT]
     body.innerHTML = `
       <div style="display:flex;gap:2px;justify-content:center;align-items:center;height:100%">
-        <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;min-width:45px">
+        <div style="text-align:center;padding:3px;border:1px solid ${inA.val==='X'?'#ff9e64':'#2a3046'};border-radius:3px;background:#1a1d2e;min-width:45px">
           <div style="font-size:8px;color:#79c0ff;line-height:1.2">${inA.label}</div>
-          <div style="font-size:20px;font-weight:bold;line-height:1.2;color:${inA.val==='1'?'#2faa60':'#d84a4a'}">${inA.val}</div>
+          <div style="font-size:20px;font-weight:bold;line-height:1.2;color:${getInputColor(inA)}">${inA.val}</div>
           ${inA.detail ? `<div style="font-size:7px;color:#7a7f8f;line-height:1.2;margin-top:1px">${inA.detail}</div>` : ''}
         </div>
         <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;min-width:35px">
           <div style="font-size:11px;font-weight:bold;color:#e0af68;line-height:1.4">${op}</div>
         </div>
-        <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;min-width:45px">
+        <div style="text-align:center;padding:3px;border:1px solid ${inB.val==='X'?'#ff9e64':'#2a3046'};border-radius:3px;background:#1a1d2e;min-width:45px">
           <div style="font-size:8px;color:#79c0ff;line-height:1.2">${inB.label}</div>
-          <div style="font-size:20px;font-weight:bold;line-height:1.2;color:${inB.val==='1'?'#2faa60':'#d84a4a'}">${inB.val}</div>
+          <div style="font-size:20px;font-weight:bold;line-height:1.2;color:${getInputColor(inB)}">${inB.val}</div>
           ${inB.detail ? `<div style="font-size:7px;color:#7a7f8f;line-height:1.2;margin-top:1px">${inB.detail}</div>` : ''}
         </div>
         <div style="text-align:center;padding:3px;min-width:10px">
