@@ -8,7 +8,7 @@
         "index": 0,
         "comparison": "lt",
         "compare_to_type": "value",
-        "compare_value": 550.0,
+        "compare_value": 165.0,
         "compare_to_kind": "ao",
         "compare_to_index": null
       },
@@ -37,10 +37,10 @@
       },
       "input_b": {
         "kind": "tc",
-        "index": 0,
+        "index": 4,
         "comparison": "lt",
         "compare_to_type": "value",
-        "compare_value": 105.0,
+        "compare_value": 250.0,
         "compare_to_kind": null,
         "compare_to_index": null
       },
@@ -60,7 +60,7 @@
       },
       "input_b": {
         "kind": "tc",
-        "index": 0,
+        "index": 2,
         "comparison": "lt",
         "compare_to_type": "value",
         "compare_value": 190.0,

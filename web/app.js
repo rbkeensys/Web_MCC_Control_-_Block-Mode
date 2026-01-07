@@ -1604,6 +1604,7 @@ function renderWidget(w){
   if (w.type === 'dobutton') classList += ' dobutton-widget';
   if (w.type === 'le') classList += ' le-widget';
   if (w.type === 'mathop') classList += ' mathop-widget';
+  if (w.type === 'pidpanel') classList += ' pidpanel-widget';
   const box=el('div',{className:classList, id:'w_'+w.id});
   
   // LE and mathop widgets get minimal headers (via CSS)
@@ -3250,26 +3251,26 @@ function mountLEWidget(w, body){
       return inp.val === '1' ? '#2faa60' : '#d84a4a';
     };
     
-    // Compact 5-box layout: [A][OP][B][=][OUT]
+    // Compact 5-box layout: [A][OP][B][=][OUT] - using flex for scaling
     body.innerHTML = `
-      <div style="display:flex;gap:2px;justify-content:center;align-items:center;height:100%">
-        <div style="text-align:center;padding:3px;border:1px solid ${inA.val==='X'?'#ff9e64':'#2a3046'};border-radius:3px;background:#1a1d2e;min-width:45px">
+      <div style="display:flex;gap:2px;justify-content:center;align-items:center;height:100%;padding:2px">
+        <div style="text-align:center;padding:3px;border:1px solid ${inA.val==='X'?'#ff9e64':'#2a3046'};border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:8px;color:#79c0ff;line-height:1.2">${inA.label}</div>
           <div style="font-size:20px;font-weight:bold;line-height:1.2;color:${getInputColor(inA)}">${inA.val}</div>
           ${inA.detail ? `<div style="font-size:7px;color:#7a7f8f;line-height:1.2;margin-top:1px">${inA.detail}</div>` : ''}
         </div>
-        <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;min-width:35px">
+        <div style="text-align:center;padding:3px;border:1px solid #2a3046;border-radius:3px;background:#1a1d2e;flex:0 0 35px;overflow:hidden">
           <div style="font-size:11px;font-weight:bold;color:#e0af68;line-height:1.4">${op}</div>
         </div>
-        <div style="text-align:center;padding:3px;border:1px solid ${inB.val==='X'?'#ff9e64':'#2a3046'};border-radius:3px;background:#1a1d2e;min-width:45px">
+        <div style="text-align:center;padding:3px;border:1px solid ${inB.val==='X'?'#ff9e64':'#2a3046'};border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:8px;color:#79c0ff;line-height:1.2">${inB.label}</div>
           <div style="font-size:20px;font-weight:bold;line-height:1.2;color:${getInputColor(inB)}">${inB.val}</div>
           ${inB.detail ? `<div style="font-size:7px;color:#7a7f8f;line-height:1.2;margin-top:1px">${inB.detail}</div>` : ''}
         </div>
-        <div style="text-align:center;padding:3px;min-width:10px">
+        <div style="text-align:center;padding:3px;flex:0 0 15px">
           <div style="font-size:14px;color:#9aa1b9;line-height:1.4">=</div>
         </div>
-        <div style="text-align:center;padding:3px;border:2px solid ${output==='1'?'#2faa60':'#d84a4a'};border-radius:3px;background:#1a1d2e;min-width:40px">
+        <div style="text-align:center;padding:3px;border:2px solid ${output==='1'?'#2faa60':'#d84a4a'};border-radius:3px;background:#1a1d2e;flex:1;min-width:0;overflow:hidden">
           <div style="font-size:8px;color:#9aa1b9;line-height:1.2">OUT</div>
           <div style="font-size:22px;font-weight:bold;line-height:1.2;color:${output==='1'?'#2faa60':'#d84a4a'}">${output}</div>
         </div>
@@ -3470,14 +3471,20 @@ function makeDragResize(node, w, header, handle){
   let dragging=false,resizing=false,sx=0,sy=0,ox=0,oy=0,ow=0,oh=0;
   
   // Set minimum sizes based on widget type
-  const minW = (w.type === 'dobutton') ? 70 : 280;
+  let minW = 280;
+  if (w.type === 'dobutton') minW = 70;
+  else if (w.type === 'le' || w.type === 'mathop') minW = 140;  // 50% of default 280
+  else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
+  
   let minH = 180;
   if (w.type === 'dobutton') minH = 45;
   else if (w.type === 'le' || w.type === 'mathop') minH = 10;  // Half of default 20
   
   header.addEventListener('mousedown', (e)=>{
     const tag=(e.target.tagName||'').toUpperCase();
-    if (['INPUT','SELECT','BUTTON','TEXTAREA','LABEL','OPTION','SPAN'].includes(tag)) return;
+    // Allow clicking on icon spans (settings/close buttons)
+    if (e.target.classList && e.target.classList.contains('icon')) return;
+    if (['INPUT','SELECT','BUTTON','TEXTAREA','LABEL','OPTION'].includes(tag)) return;
     dragging=true; ox=w.x; oy=w.y; sx=e.clientX; sy=e.clientY; e.preventDefault();
   });
   handle.addEventListener('mousedown', (e)=>{ resizing=true; ow=w.w; oh=w.h; sx=e.clientX; sy=e.clientY; e.preventDefault(); });

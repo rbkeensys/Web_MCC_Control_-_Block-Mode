@@ -34,7 +34,8 @@ body.fullscreen #exitFullscreenBtn { display: block; }
 .canvas { flex:1; position:relative; overflow:auto; padding:0; }
 .widget { position:absolute; display:flex; flex-direction:column; background:var(--card); border:1px solid #262a3e; border-radius:12px; min-width:280px; }
 .widget.dobutton-widget { min-width:70px; min-height:45px; }
-.widget.le-widget, .widget.mathop-widget { min-height:10px; }
+.widget.le-widget, .widget.mathop-widget { min-height:10px; min-width:140px; }
+.widget.pidpanel-widget { min-width:168px; }
 .widget header { display:flex; align-items:flex-start; gap:8px; padding:8px; cursor:grab; }
 .widget.le-widget header, .widget.mathop-widget header { padding:2px 4px; min-height:14px; font-size:9px; }
 .widget header .title { font-weight:600; }
@@ -55,6 +56,7 @@ legend { color:#a8b3cf; padding:0 6px; }
 .icon { background:#1e2235; border:1px solid #2a3048; color:#cfd6f0; border-radius:8px; padding:4px 8px; cursor:pointer; user-select:none; }
 .icon:hover { background:#242a4a; }
 .resize { position:absolute; right:6px; bottom:6px; width:14px; height:14px; border-right:2px solid #3e4668; border-bottom:2px solid #3e4668; cursor:nwse-resize; opacity:0.7; }
+.widget.le-widget .resize, .widget.mathop-widget .resize { right:11px; }
 .row { display:flex; gap:8px; align-items:center; }
 .row>* { flex:1; }
 hr.soft { border:0; border-top:1px solid #1f2330; margin:6px 0; }
