@@ -4,6 +4,13 @@
       "enabled": true,
       "name": "rpm conv",
       "operation": "mul",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "ao",
         "index": 1,
@@ -27,6 +34,13 @@
       "enabled": true,
       "name": "DP Flow Subtract",
       "operation": "sub",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "ai",
         "index": 0,
@@ -50,6 +64,13 @@
       "enabled": true,
       "name": "sqrt DP Flow",
       "operation": "sqrt",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "math",
         "index": 1,
@@ -69,6 +90,13 @@
       "enabled": true,
       "name": "Q Calc gpm",
       "operation": "mul",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "math",
         "index": 2,
@@ -92,6 +120,13 @@
       "enabled": true,
       "name": "Filtered Q",
       "operation": "filter",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "math",
         "index": 3,
@@ -111,6 +146,13 @@
       "enabled": true,
       "name": "Level subtract",
       "operation": "sub",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "ai",
         "index": 2,
@@ -134,6 +176,13 @@
       "enabled": true,
       "name": "Level Conv",
       "operation": "mul",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "math",
         "index": 5,
@@ -157,6 +206,13 @@
       "enabled": true,
       "name": "Filtered Level",
       "operation": "filter",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "math",
         "index": 6,
@@ -174,8 +230,53 @@
     },
     {
       "enabled": true,
-      "name": "Level Low",
+      "name": "M8:High Level",
       "operation": "if_lt",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
+      "input_a": {
+        "kind": "math",
+        "index": 7,
+        "value": null
+      },
+      "input_b": {
+        "kind": "value",
+        "index": 1,
+        "value": 48.0
+      },
+      "output_true": {
+        "kind": "value",
+        "index": 0,
+        "value": 1.0
+      },
+      "output_false": {
+        "kind": "value",
+        "index": 0,
+        "value": 0.0
+      },
+      "filter_hz": null,
+      "has_output": false,
+      "output_type": null,
+      "output_channel": null,
+      "output_min": null,
+      "output_max": null
+    },
+    {
+      "enabled": true,
+      "name": "M9:Low Level",
+      "operation": "if_gte",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
       "input_a": {
         "kind": "math",
         "index": 7,
@@ -189,14 +290,96 @@
       "output_true": {
         "kind": "value",
         "index": 0,
-        "value": 1.0
+        "value": 0.0
       },
       "output_false": {
         "kind": "value",
         "index": 0,
-        "value": 0.0
+        "value": 1.0
       },
       "filter_hz": null,
+      "has_output": false,
+      "output_type": null,
+      "output_channel": null,
+      "output_min": null,
+      "output_max": null
+    },
+    {
+      "enabled": true,
+      "name": "Set Flow",
+      "operation": "add",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
+      "input_a": {
+        "kind": "value",
+        "index": 0,
+        "value": null
+      },
+      "input_b": {
+        "kind": "value",
+        "index": 1,
+        "value": 0.12
+      },
+      "output_true": null,
+      "output_false": null,
+      "filter_hz": null,
+      "has_output": false,
+      "output_type": null,
+      "output_channel": null,
+      "output_min": null,
+      "output_max": null
+    },
+    {
+      "enabled": true,
+      "name": "DP Level 1 Filt",
+      "operation": "filter",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
+      "input_a": {
+        "kind": "ai",
+        "index": 2,
+        "value": null
+      },
+      "input_b": null,
+      "output_true": null,
+      "output_false": null,
+      "filter_hz": 0.02,
+      "has_output": false,
+      "output_type": null,
+      "output_channel": null,
+      "output_min": null,
+      "output_max": null
+    },
+    {
+      "enabled": true,
+      "name": "DP Level 2 Filt",
+      "operation": "filter",
+      "inputs": [
+        {
+          "kind": "ai",
+          "index": 0,
+          "value": null
+        }
+      ],
+      "input_a": {
+        "kind": "ai",
+        "index": 3,
+        "value": null
+      },
+      "input_b": null,
+      "output_true": null,
+      "output_false": null,
+      "filter_hz": 0.02,
       "has_output": false,
       "output_type": null,
       "output_channel": null,

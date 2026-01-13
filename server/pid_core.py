@@ -32,6 +32,11 @@ class _PID:
         self.prev = None
         self.tick_counter = 0  # For execution rate decimation
         self.last_u = 0.0      # Last output value (for decimated execution)
+        # Store last telemetry values for skip cycles
+        self.last_pv = 0.0
+        self.last_err = 0.0
+        self.last_p = 0.0
+        self.last_d = 0.0
 
     def step(self, pv: float, dt: float):
         e = self.d.target - pv
@@ -46,6 +51,13 @@ class _PID:
             d = self.d.kd * (e - self.prev) / max(1e-6, dt)
         self.prev = e
         u = p + self.i + d
+        
+        # Store for telemetry during skip cycles
+        self.last_pv = pv
+        self.last_err = e
+        self.last_p = p
+        self.last_d = d
+        
         return u, e, p, self.i, d  # Return u, error, p_term, i_term, d_term
 
 class PIDManager:
@@ -167,10 +179,13 @@ class PIDManager:
             if not should_execute:
                 tel.append({
                     "name": d.name, 
-                    "pv": 0.0,  # Could read current PV but not necessary
+                    "pv": p.last_pv,
                     "u": p.last_u, 
                     "out": p.last_u, 
-                    "err": 0.0, 
+                    "err": p.last_err,
+                    "p_term": p.last_p,
+                    "i_term": p.i,  # I term is always current
+                    "d_term": p.last_d,
                     "enabled": True, 
                     "gated": False,
                     "skipped": True

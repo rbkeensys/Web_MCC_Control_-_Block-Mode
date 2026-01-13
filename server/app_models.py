@@ -106,20 +106,23 @@ class MotorFile(BaseModel):
 
 # NEW: Logic Element models
 class LEInputCfg(BaseModel):
-    kind: str = "do"  # "do", "ai", "ao", "tc", "pid_u", "le"
+    kind: str = "do"  # "do", "ai", "ao", "tc", "pid_u", "le", "math"
     index: int = 0
     # For analog values:
     comparison: Optional[str] = None  # "lt", "eq", "gt"
     compare_to_type: Optional[str] = None  # "value" or "signal"
     compare_value: Optional[float] = None
-    compare_to_kind: Optional[str] = None  # "ai", "ao", "tc", "pid_u"
+    compare_to_kind: Optional[str] = None  # "ai", "ao", "tc", "pid_u", "math"
     compare_to_index: Optional[int] = None
 
 class LogicElementCfg(BaseModel):
     enabled: bool = True
     name: str = "LE"
-    input_a: LEInputCfg
-    input_b: LEInputCfg
+    # Variable inputs (1-8)
+    inputs: List[LEInputCfg] = [LEInputCfg(), LEInputCfg()]  # Default to 2 inputs
+    # Legacy fields for backward compatibility
+    input_a: Optional[LEInputCfg] = None
+    input_b: Optional[LEInputCfg] = None
     operation: str = "and"  # "and", "or", "xor", "nand", "nor", "nxor"
 
 class LEFile(BaseModel):

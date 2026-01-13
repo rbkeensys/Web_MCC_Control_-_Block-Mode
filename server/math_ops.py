@@ -21,8 +21,11 @@ class MathOperator(BaseModel):
     operation: str = "add"  # Unary: sqr, sqrt, log10, ln, exp, sin, cos, tan, abs, neg, filter
                             # Binary: add, sub, mul, div, mod, pow, min, max
                             # Conditional: if_gt, if_gte, if_lt, if_lte, if_eq, if_neq
-    input_a: MathOpInput = MathOpInput()
-    input_b: Optional[MathOpInput] = None  # For binary and conditional operations
+    # Variable inputs (1-8)
+    inputs: List[MathOpInput] = [MathOpInput()]  # Default to 1 input
+    # Legacy fields for backward compatibility - will be migrated to inputs array
+    input_a: Optional[MathOpInput] = None
+    input_b: Optional[MathOpInput] = None
     # For IF operations:
     output_true: Optional[MathOpInput] = None   # Value when condition is true
     output_false: Optional[MathOpInput] = None  # Value when condition is false
@@ -55,6 +58,30 @@ class MathOpManager:
     def load(self, math_file: MathOpFile):
         """Load operators from config"""
         self.operators = math_file.operators
+        
+        # Migrate old format to new format
+        for op in self.operators:
+            # Check if this is old format (has input_a/input_b set, inputs is default/empty)
+            # Old configs will have input_a as a dict, new configs will have it as None
+            has_old_format = (
+                hasattr(op, 'input_a') and 
+                op.input_a is not None and 
+                isinstance(op.input_a, MathOpInput)
+            )
+            
+            if has_old_format:
+                # Migrate from old format
+                op.inputs = [op.input_a]
+                if op.input_b is not None and isinstance(op.input_b, MathOpInput):
+                    op.inputs.append(op.input_b)
+                print(f"[MathOps] Migrated {op.name} from old format: {len(op.inputs)} inputs")
+                # Clear legacy fields
+                op.input_a = None
+                op.input_b = None
+            elif not op.inputs or len(op.inputs) == 0:
+                # No inputs at all - set default
+                op.inputs = [MathOpInput()]
+        
         self.outputs = [0.0] * len(self.operators)
         self.filter_states = [{'value': 0.0, 'raw': 0.0} for _ in self.operators]
         self.last_time = None
@@ -123,9 +150,9 @@ class MathOpManager:
                 continue
             
             try:
-                # Get input(s)
-                val_a = self.get_input_value(op.input_a, state)
-                val_b = None
+                # Get input(s) from inputs array
+                val_a = self.get_input_value(op.inputs[0] if len(op.inputs) > 0 else MathOpInput(), state)
+                val_b = self.get_input_value(op.inputs[1] if len(op.inputs) > 1 else MathOpInput(), state) if len(op.inputs) > 1 else None
                 
                 # Perform operation
                 result = 0.0
@@ -186,11 +213,9 @@ class MathOpManager:
                 
                 # Binary operations
                 elif op.operation in self.BINARY_OPS:
-                    if op.input_b is None:
+                    if len(op.inputs) < 2 or val_b is None:
                         result = 0.0
                     else:
-                        val_b = self.get_input_value(op.input_b, state)
-                        
                         if op.operation == "add":
                             result = val_a + val_b
                         elif op.operation == "sub":
@@ -212,10 +237,10 @@ class MathOpManager:
                 
                 # Conditional (IF) operations
                 elif op.operation in self.IF_OPS:
-                    if op.input_b is None or op.output_true is None or op.output_false is None:
+                    if len(op.inputs) < 2 or op.output_true is None or op.output_false is None:
                         result = 0.0
                     else:
-                        val_b = self.get_input_value(op.input_b, state)
+                        # val_b already loaded above
                         
                         # Evaluate condition
                         condition = False

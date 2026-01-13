@@ -6,12 +6,12 @@
       "src": "math",
       "ai_ch": 3,
       "out_ch": 1,
-      "target": 0.13,
+      "target": 0.12,
       "kp": 15.0,
       "ki": 3.0,
       "kd": 0.0,
       "out_min": 0.3,
-      "out_max": 3.0,
+      "out_max": 1.2,
       "err_min": -1.5,
       "err_max": 1.5,
       "i_min": -1.0,
@@ -19,14 +19,14 @@
       "name": "Motor CMD",
       "enable_gate": true,
       "enable_kind": "le",
-      "enable_index": 0,
-      "execution_rate_hz": null
+      "enable_index": 4,
+      "execution_rate_hz": 0.0
     },
     {
       "enabled": true,
       "kind": "var",
-      "src": "ao",
-      "ai_ch": 1,
+      "src": "math",
+      "ai_ch": 4,
       "out_ch": 1,
       "target": 0.0,
       "kp": -300.0,
@@ -38,7 +38,7 @@
       "err_max": 1000.0,
       "i_min": null,
       "i_max": null,
-      "name": "rpm conv.",
+      "name": "Level Control",
       "enable_gate": false,
       "enable_kind": "do",
       "enable_index": 0,
@@ -64,7 +64,7 @@
       "enable_gate": true,
       "enable_kind": "le",
       "enable_index": 2,
-      "execution_rate_hz": null
+      "execution_rate_hz": 5.0
     }
   ]
 }

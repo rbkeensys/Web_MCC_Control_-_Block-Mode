@@ -86,6 +86,16 @@ class LEManager:
                     operation=elem_dict.get("operation", "and")
                 )
                 
+                # Migrate to inputs array if needed
+                if hasattr(elem, 'input_a') and elem.input_a is not None:
+                    elem.inputs = [elem.input_a]
+                    if hasattr(elem, 'input_b') and elem.input_b is not None:
+                        elem.inputs.append(elem.input_b)
+                    print(f"[LE] Migrated {elem.name} to inputs array: {len(elem.inputs)} inputs")
+                elif not hasattr(elem, 'inputs') or not elem.inputs:
+                    # No inputs - set defaults
+                    elem.inputs = [input_a, input_b]
+                
                 self.elements.append(elem)
             except Exception as e:
                 print(f"[LE] Failed to load element: {e}")
@@ -108,6 +118,36 @@ class LEManager:
                 # Reference to another LE output
                 if inp.index < len(self.outputs):
                     return self.outputs[inp.index]
+                return False
+            
+            elif inp.kind == "math":
+                # Reference to a math operator output
+                math_vals = state.get("math", [])
+                if inp.index < len(math_vals):
+                    val = math_vals[inp.index].get("output", 0.0)
+                    # Check for NaN
+                    import math as m
+                    if not m.isfinite(val):
+                        return False
+                    # If there's a comparison, do it
+                    if inp.comparison:
+                        # Similar to analog handling below
+                        if inp.compare_to_type == "value":
+                            compare_val = inp.compare_value if inp.compare_value is not None else 0.0
+                        else:
+                            compare_val = 0.0  # Simplified for now
+                        
+                        if inp.comparison == "lt":
+                            return val < compare_val
+                        elif inp.comparison == "eq":
+                            return abs(val - compare_val) < 1e-6
+                        elif inp.comparison == "gt":
+                            return val > compare_val
+                        else:
+                            return val != 0.0
+                    else:
+                        # No comparison - treat as boolean (non-zero = true)
+                        return val != 0.0
                 return False
             
             elif inp.kind in ["ai", "ao", "tc", "pid_u"]:
@@ -220,9 +260,13 @@ class LEManager:
                 continue
             
             try:
+                # Use input_a and input_b directly (inputs array migration causes issues)
+                input_a = elem.input_a
+                input_b = elem.input_b
+                
                 # Evaluate both inputs
-                a = self.evaluate_input(elem.input_a, state)
-                b = self.evaluate_input(elem.input_b, state)
+                a = self.evaluate_input(input_a, state)
+                b = self.evaluate_input(input_b, state)
                 
                 # Perform logic operation
                 result = self.evaluate_operation(a, b, elem.operation)
@@ -230,6 +274,8 @@ class LEManager:
                 
             except Exception as e:
                 print(f"[LE] Error evaluating element {i} '{elem.name}': {e}")
+                import traceback
+                traceback.print_exc()
                 self.outputs[i] = False
         
         return self.outputs

@@ -483,37 +483,37 @@ async def acq_loop():
             ao = mcc.get_ao_snapshot()
             do = mcc.get_do_snapshot()
 
-            # --- Logic Elements ---
-            # Evaluate BEFORE PIDs so PIDs can use LE outputs as enable gates
-            le_outputs = le_mgr.evaluate_all({
-                "ai": ai_scaled,
-                "ao": ao,
-                "do": do,
-                "tc": tc_vals,
-                "pid": []  # PIDs haven't run yet
-            })
-            le_tel = le_mgr.get_telemetry()
-
             # --- Math Operators ---
-            # Evaluate AFTER LEs but BEFORE PIDs so PIDs can use math outputs
+            # Evaluate first so LEs can use math outputs
             math_tel = math_mgr.evaluate_all({
                 "ai": ai_scaled,
                 "ao": ao,
                 "tc": tc_vals,
                 "pid": [],  # PIDs haven't run yet
-                "le": le_outputs
+                "le": []    # LEs haven't been evaluated with math yet
             }, bridge=mcc)
 
+            # --- Logic Elements ---
+            # Evaluate AFTER Math but BEFORE PIDs so PIDs can use LE outputs as enable gates
+            le_outputs = le_mgr.evaluate_all({
+                "ai": ai_scaled,
+                "ao": ao,
+                "do": do,
+                "tc": tc_vals,
+                "pid": [],  # PIDs haven't run yet
+                "math": math_tel  # Now LEs can use math outputs
+            })
+            le_tel = le_mgr.get_telemetry()
+
             # --- PIDs (may drive DO/AO) ---
-            # Pass DO/LE state so PIDs can use their enable gates
+            # Pass DO/LE/Math state so PIDs can use them
             # Pass previous cycle's PID telemetry for cascade control (pid source)
-            # Pass math outputs so PIDs can use math as source
             telemetry = pid_mgr.step(
                 ai_vals=ai_scaled,
                 tc_vals=tc_vals,
                 bridge=mcc,
                 do_state=do,
-                le_state=le_tel,
+                le_state=le_tel,  # Now has updated LE state with math
                 pid_prev=last_pid_telemetry,
                 math_outputs=[m.get("output", 0.0) for m in math_tel],
                 sample_rate_hz=acq_rate_hz
@@ -529,7 +529,8 @@ async def acq_loop():
                 "ao": ao,
                 "do": do,
                 "tc": tc_vals,
-                "pid": telemetry
+                "pid": telemetry,
+                "math": math_tel  # Keep math available
             })
             le_tel = le_mgr.get_telemetry()
 

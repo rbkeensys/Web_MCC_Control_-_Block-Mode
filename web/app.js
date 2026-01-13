@@ -3233,6 +3233,7 @@ function mountLEWidget(w, body){
           else if (cKind === 'ao') compVal = state.ao?.[cCh] ?? 0;
           else if (cKind === 'tc') compVal = state.tc?.[cCh] ?? 0;
           else if (cKind === 'pid_u') compVal = state.pid?.[cCh]?.u ?? 0;
+          else if (cKind === 'math') compVal = state.math?.[cCh]?.output ?? 0;
         } else {
           compVal = inputCfg.compare_value ?? 0;
         }
@@ -3259,6 +3260,7 @@ function mountLEWidget(w, body){
           else if (cKind === 'ao') compVal = state.ao?.[cCh] ?? 0;
           else if (cKind === 'tc') compVal = state.tc?.[cCh] ?? 0;
           else if (cKind === 'pid_u') compVal = state.pid?.[cCh]?.u ?? 0;
+          else if (cKind === 'math') compVal = state.math?.[cCh]?.output ?? 0;
         } else {
           compVal = inputCfg.compare_value ?? 0;
         }
@@ -3291,6 +3293,7 @@ function mountLEWidget(w, body){
           else if (cKind === 'ao') compVal = state.ao?.[cCh] ?? 0;
           else if (cKind === 'tc') compVal = state.tc?.[cCh] ?? 0;
           else if (cKind === 'pid_u') compVal = state.pid?.[cCh]?.u ?? 0;
+          else if (cKind === 'math') compVal = state.math?.[cCh]?.output ?? 0;
         } else {
           compVal = inputCfg.compare_value ?? 0;
         }
@@ -3317,6 +3320,7 @@ function mountLEWidget(w, body){
           else if (cKind === 'ao') compVal = state.ao?.[cCh] ?? 0;
           else if (cKind === 'tc') compVal = state.tc?.[cCh] ?? 0;
           else if (cKind === 'pid_u') compVal = state.pid?.[cCh]?.u ?? 0;
+          else if (cKind === 'math') compVal = state.math?.[cCh]?.output ?? 0;
         } else {
           compVal = inputCfg.compare_value ?? 0;
         }
@@ -3331,12 +3335,52 @@ function mountLEWidget(w, body){
         detail = `${rawVal.toFixed(1)}${compSym}${compVal.toFixed(1)}`;
         return {label: `PID${ch}`, val, detail};
       }
+      else if (kind === 'math') {
+        const rawVal = state.math?.[ch]?.output ?? 0;
+        
+        // Check if there's a comparison configured
+        if (inputCfg.comparison) {
+          const comp = inputCfg.comparison;
+          let compVal = 0;
+          
+          if (inputCfg.compare_to_type === 'signal') {
+            const cKind = inputCfg.compare_to_kind || 'ai';
+            const cCh = inputCfg.compare_to_index || 0;
+            if (cKind === 'ai') compVal = state.ai?.[cCh] ?? 0;
+            else if (cKind === 'ao') compVal = state.ao?.[cCh] ?? 0;
+            else if (cKind === 'tc') compVal = state.tc?.[cCh] ?? 0;
+            else if (cKind === 'pid_u') compVal = state.pid?.[cCh]?.u ?? 0;
+            else if (cKind === 'math') compVal = state.math?.[cCh]?.output ?? 0;
+          } else {
+            compVal = inputCfg.compare_value ?? 0;
+          }
+          
+          let result = false;
+          if (comp === 'lt') result = rawVal < compVal;
+          else if (comp === 'eq') result = Math.abs(rawVal - compVal) < 0.001;
+          else result = rawVal > compVal;
+          
+          val = result ? '1' : '0';
+          const compSym = comp === 'lt' ? '<' : (comp === 'eq' ? '=' : '>');
+          detail = `${rawVal.toFixed(1)}${compSym}${compVal.toFixed(1)}`;
+          return {label: `Math${ch}`, val, detail};
+        } else {
+          // No comparison - just use the value as boolean (non-zero = 1)
+          val = rawVal !== 0 ? '1' : '0';
+          detail = rawVal.toFixed(2);
+          return {label: `Math${ch}`, val, detail};
+        }
+      }
       
       return {label: '?', val: '?', detail: ''};
     };
     
-    const inA = getInputInfo(leConfig.input_a);
-    const inB = getInputInfo(leConfig.input_b);
+    // For now, always use input_a/input_b (inputs array has wrong defaults from Pydantic)
+    const inputA = leConfig.input_a;
+    const inputB = leConfig.input_b;
+    
+    const inA = getInputInfo(inputA);
+    const inB = getInputInfo(inputB);
     const output = le.output ? '1' : '0';
     const op = (leConfig.operation || 'and').toUpperCase();
     
@@ -3589,8 +3633,9 @@ function makeDragResize(node, w, header, handle){
   let dragging=false,resizing=false,sx=0,sy=0,ox=0,oy=0,ow=0,oh=0;
   
   // Set minimum sizes based on widget type
-  let minW = 100;
+  let minW = 280;
   if (w.type === 'dobutton') minW = 70;
+  else if (w.type === 'bars') minW = 100;  // Allow narrow bar graphs
   else if (w.type === 'le' || w.type === 'mathop') minW = 140;  // 50% of default 280
   else if (w.type === 'pidpanel') minW = 168;  // 60% of default 280
   
@@ -4266,7 +4311,7 @@ async function openLEEditor(){
         signalSelect.replaceWith(newSel);
         signalSelect = newSel;
         // Clear comparison fields when switching to non-analog types
-        if (!['ai', 'ao', 'tc', 'pid_u'].includes(e.target.value)) {
+        if (!['ai', 'ao', 'tc', 'pid_u', 'math'].includes(e.target.value)) {
           delete input.comparison;
           delete input.compare_to_type;
           delete input.compare_value;
@@ -4283,7 +4328,7 @@ async function openLEEditor(){
     });
     
     // Add options - compact version
-    ['do', 'ai', 'ao', 'tc', 'pid_u', 'le'].forEach(k => {
+    ['do', 'ai', 'ao', 'tc', 'pid_u', 'le', 'math'].forEach(k => {
       const opt = el('option', {value: k}, k.toUpperCase());
       kindSelect.append(opt);
     });
@@ -4368,7 +4413,7 @@ async function openLEEditor(){
             compareSignalSelect = newSel;
           }
         });
-        ['ai', 'ao', 'tc', 'pid_u'].forEach(k => {
+        ['ai', 'ao', 'tc', 'pid_u', 'math'].forEach(k => {
           signalKindSelect.append(el('option', {value: k}, k.toUpperCase()));
         });
         signalKindSelect.value = input.compare_to_kind || 'ai';
