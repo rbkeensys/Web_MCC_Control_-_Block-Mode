@@ -6420,6 +6420,7 @@ function openExpressionDebug(widget) {
 }
 
 /* ----------------------------- Expression Editor -------------------------------- */
+/* ----------------------------- Expression Editor -------------------------------- */
 async function openExpressionEditor() {
   let expressions = [];
   
@@ -6434,6 +6435,33 @@ async function openExpressionEditor() {
   
   const root = el('div', {});
   const title = el('h2', {}, 'Expression Editor');
+  
+  // ADD: Load button at top
+  const topButtons = el('div', {style: 'display:flex; gap:8px; margin-bottom:12px;'});
+  const loadBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      const inp = el('input', {type: 'file', accept: '.json'});
+      inp.onchange = async () => {
+        const f = inp.files?.[0];
+        if (!f) return;
+        try {
+          const text = await f.text();
+          const loaded = JSON.parse(text);
+          expressions = loaded.expressions || [];
+          renderList();
+          if (expressions.length > 0) {
+            selectExpression(expressions[0]);
+          }
+          alert(`Loaded ${expressions.length} expressions from ${f.name}`);
+        } catch(e) {
+          alert('Failed to load: ' + e.message);
+        }
+      };
+      inp.click();
+    }
+  }, '📁 Load from File');
+  topButtons.append(loadBtn);
   
   const container = el('div', {style: 'display:flex; gap:20px; height:60vh;'});
   
@@ -6456,7 +6484,8 @@ async function openExpressionEditor() {
         expressions.push({
           name: name,
           enabled: true,
-          expression: '// Write your expression here\n0'
+          expression: '// Write your expression here\n0',
+          execution_rate_hz: null  // ADD: Initialize new field
         });
         renderList();
         selectExpression(expressions[expressions.length - 1]);
@@ -6472,8 +6501,11 @@ async function openExpressionEditor() {
       });
       
       const title = el('div', {style: 'font-weight:bold; margin-bottom:5px;'}, expr.name);
+      
+      // ADD: Show execution rate if set
+      const rateText = expr.execution_rate_hz ? ` @ ${expr.execution_rate_hz}Hz` : '';
       const status = el('div', {style: `font-size:12px; color:${expr.enabled ? '#4a9eff' : '#666'}`}, 
-        expr.enabled ? '✓ Enabled' : '✗ Disabled');
+        (expr.enabled ? '✓ Enabled' : '✗ Disabled') + rateText);
       
       card.append(title, status);
       listPanel.append(card);
@@ -6503,7 +6535,10 @@ async function openExpressionEditor() {
         el('input', {
           type: 'text',
           value: selectedExpr.name,
-          oninput: e => selectedExpr.name = e.target.value,
+          oninput: e => {
+            selectedExpr.name = e.target.value;
+            renderList();  // Update list when name changes
+          },
           style: 'width:100%;'
         })
       ]),
@@ -6511,14 +6546,38 @@ async function openExpressionEditor() {
         el('input', {
           type: 'checkbox',
           checked: selectedExpr.enabled,
-          onchange: e => selectedExpr.enabled = e.target.checked
+          onchange: e => {
+            selectedExpr.enabled = e.target.checked;
+            renderList();  // Update list when enabled changes
+          }
         }),
         ' Enabled'
       ])
     );
     editorPanel.append(topRow);
     
-    // Expression textarea
+    // ADD: Execution rate row (small, unobtrusive)
+    const rateRow = el('div', {style: 'margin-bottom:10px; display:flex; align-items:center; gap:8px;'});
+    rateRow.append(
+      el('label', {style: 'font-size:12px; color:#8b949e;'}, 'Execution Rate:'),
+      el('input', {
+        type: 'number',
+        min: '0',
+        step: '1',
+        placeholder: 'Hz (empty = sample rate)',
+        value: selectedExpr.execution_rate_hz || '',
+        oninput: e => {
+          const val = parseFloat(e.target.value);
+          selectedExpr.execution_rate_hz = (val > 0) ? val : null;
+          renderList();
+        },
+        style: 'width:100px; padding:4px; font-size:12px;'
+      }),
+      el('span', {style: 'font-size:11px; color:#666;'}, 'Hz')
+    );
+    editorPanel.append(rateRow);
+    
+    // Expression textarea - KEEP ORIGINAL STYLING
     const textareaLabel = el('div', {style: 'font-weight:bold; margin-bottom:5px;'}, 'Expression:');
     const textarea = el('textarea', {
       value: selectedExpr.expression || '',
@@ -6528,7 +6587,7 @@ async function openExpressionEditor() {
     
     editorPanel.append(textareaLabel, textarea);
     
-    // Syntax check button and result
+    // Syntax check button and result - KEEP ORIGINAL GREEN/RED STYLING
     const syntaxRow = el('div', {style: 'display:flex; gap:10px; align-items:center;'});
     const syntaxResult = el('div', {style: 'flex:1; padding:10px; border-radius:6px; font-size:14px; font-family:monospace;'});
     
@@ -6544,6 +6603,7 @@ async function openExpressionEditor() {
           const result = await resp.json();
           
           if (result.ok) {
+            // GREEN for success
             syntaxResult.style.background = '#1a3a1a';
             syntaxResult.style.color = '#4a9';
             let message = `✓ Syntax OK - Result: ${result.result.toFixed(4)}`;
@@ -6562,6 +6622,7 @@ async function openExpressionEditor() {
             
             syntaxResult.textContent = message;
           } else {
+            // RED for error with X
             syntaxResult.style.background = '#3a1a1a';
             syntaxResult.style.color = '#f88';
             syntaxResult.textContent = `✗ Error: ${result.error}`;
@@ -6593,18 +6654,21 @@ async function openExpressionEditor() {
     
     editorPanel.append(deleteBtn);
     
-    // Help text
+    // Help text - ADD execution rate info
     const helpText = el('div', {style: 'margin-top:20px; padding:10px; background:#1a2030; border-radius:6px; font-size:12px; color:#8b949e;'});
     helpText.innerHTML = `
       <strong>Expression Syntax:</strong><br>
       <code>temp = "AI:Tank" - 75</code> - Local variable<br>
       <code>static.setpoint = 50</code> - Global variable<br>
       <code>"AI:name"</code> - Signal reference<br>
+      <code>"AO:name" = 5.0</code> - Write analog output by name<br>
+      <code>"DO:name" = 1</code> - Write digital output by name<br>
       <code>"PID:name".OUT</code> - PID property (OUT, U, SP, PV, ERR)<br>
       <code>IF x > 5 THEN 10 ELSE 0</code> - Conditional<br>
       <code>sin(), cos(), max(), min(), sqrt(), abs()</code> - Functions<br>
       <code>time</code> - Current time in seconds<br>
-      <strong>Last line = return value</strong>
+      <strong>Last line = return value</strong><br><br>
+      <strong>Execution Rate:</strong> Run expression slower to save CPU (10Hz = every 10th tick)
     `;
     editorPanel.append(helpText);
   }
@@ -6684,7 +6748,9 @@ async function openExpressionEditor() {
   renderEditor();
   refreshGlobals();
   
-  // Save button
+  // Save and Save As buttons
+  const saveButtons = el('div', {style: 'display:flex; gap:8px; margin-top:20px;'});
+  
   const saveBtn = el('button', {
     className: 'btn',
     onclick: async () => {
@@ -6706,9 +6772,33 @@ async function openExpressionEditor() {
     }
   }, '💾 Save');
   
-  root.append(title, container, globalsSection, el('div', {style: 'margin-top:20px;'}, saveBtn));
+  const saveAsBtn = el('button', {
+    className: 'btn',
+    onclick: () => {
+      const filename = prompt('Save expressions as:', 'expressions.json');
+      if (!filename) return;
+      
+      // Create JSON file
+      const data = JSON.stringify({expressions: expressions}, null, 2);
+      const blob = new Blob([data], {type: 'application/json'});
+      const url = URL.createObjectURL(blob);
+      
+      // Download file
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      
+      URL.revokeObjectURL(url);
+    }
+  }, '💾 Save As...');
+  
+  saveButtons.append(saveBtn, saveAsBtn);
+  
+  root.append(title, topButtons, container, globalsSection, saveButtons);
   showModal(root);
 }
+
 
 /* ----------------------------- form bits -------------------------------- */
 function fieldset(title, inner) {

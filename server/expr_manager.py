@@ -1,6 +1,11 @@
 """
 Expression Manager - Handles expression storage and evaluation
+Version: 1.0.2 (2026-01-27)
+- Added execution_rate_hz for per-expression decimation (like PIDs)
+- Expressions can run at 10-100 Hz independently
 """
+__version__ = "1.0.2"
+__updated__ = "2026-01-27"
 
 import json
 from pathlib import Path
@@ -15,6 +20,7 @@ class Expression:
     name: str = ""
     enabled: bool = True
     expression: str = ""
+    execution_rate_hz: Optional[float] = None  # None = run at sample rate, else decimate
 
 
 class ExpressionManager:
@@ -24,6 +30,8 @@ class ExpressionManager:
         self.filepath = Path(filepath)
         self.expressions: List[Expression] = []
         self.outputs: List[float] = []  # Cached outputs
+        self.tick_counters: List[int] = []  # For execution rate decimation
+        self.last_telemetry: List[Dict] = []  # Cache telemetry for skipped cycles
         self.load()
     
     def load(self):
@@ -39,6 +47,8 @@ class ExpressionManager:
                     Expression(**expr) for expr in data.get('expressions', [])
                 ]
                 self.outputs = [0.0] * len(self.expressions)
+                self.tick_counters = [0] * len(self.expressions)
+                self.last_telemetry = [{}] * len(self.expressions)
         except Exception as e:
             print(f"[EXPR] Error loading expressions: {e}")
             self.expressions = []
@@ -55,7 +65,7 @@ class ExpressionManager:
         except Exception as e:
             print(f"[EXPR] Error saving expressions: {e}")
     
-    def evaluate_all(self, signal_state: Dict[str, Any], bridge=None) -> List[Dict]:
+    def evaluate_all(self, signal_state: Dict[str, Any], bridge=None, sample_rate_hz: float = 100.0) -> List[Dict]:
         """Evaluate all enabled expressions and return telemetry"""
         telemetry = []
         
@@ -66,12 +76,31 @@ class ExpressionManager:
         for i, expr in enumerate(self.expressions):
             if not expr.enabled:
                 self.outputs[i] = 0.0
+                self.tick_counters[i] = 0
                 telemetry.append({
                     'name': expr.name,
                     'output': 0.0,
                     'enabled': False,
                     'error': None
                 })
+                continue
+            
+            # Check if this expression should execute this cycle (decimation)
+            should_execute = True
+            if expr.execution_rate_hz is not None and expr.execution_rate_hz > 0:
+                # Calculate decimation factor
+                decimate = max(1, int(round(sample_rate_hz / expr.execution_rate_hz)))
+                self.tick_counters[i] += 1
+                should_execute = (self.tick_counters[i] >= decimate)
+                if should_execute:
+                    self.tick_counters[i] = 0
+            
+            # If not executing this cycle, return cached telemetry
+            if not should_execute:
+                # Return last telemetry with skipped flag
+                cached = self.last_telemetry[i].copy() if i < len(self.last_telemetry) else {}
+                cached['skipped'] = True
+                telemetry.append(cached)
                 continue
             
             try:
@@ -101,7 +130,7 @@ class ExpressionManager:
                 for node_id, path in branch_paths.items():
                     branch_info[str(node_id)] = path  # Convert to string for JSON
                 
-                telemetry.append({
+                telem = {
                     'name': expr.name,
                     'output': result,
                     'enabled': True,
@@ -110,7 +139,11 @@ class ExpressionManager:
                     'hw_writes': hw_writes,
                     'branches': branch_info,
                     'executed_lines': list(executed_lines)  # Convert set to list for JSON
-                })
+                }
+                
+                # Cache telemetry for skipped cycles
+                self.last_telemetry[i] = telem
+                telemetry.append(telem)
             
             except Exception as e:
                 print(f"[EXPR] Error evaluating '{expr.name}': {e}")
@@ -236,4 +269,6 @@ class ExpressionManager:
             Expression(**expr) for expr in data.get('expressions', [])
         ]
         self.outputs = [0.0] * len(self.expressions)
+        self.tick_counters = [0] * len(self.expressions)
+        self.last_telemetry = [{}] * len(self.expressions)
         self.save()

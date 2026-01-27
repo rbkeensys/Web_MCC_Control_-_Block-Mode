@@ -2,7 +2,7 @@
 Version: 1.0.0
 Updated: 2026-01-14 23:30:56
 """
-__version__ = "1.0.0"
+__version__ = "1.0.4"
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -31,7 +31,6 @@ from app_models import LEFile, LogicElementCfg
 from expr_manager import ExpressionManager
 from expr_engine import global_vars as expr_global_vars
 import logging, os, math
-SERVER_VERSION = "0.9.11"  # Added PID execution rate, IF statements, Math outputs
 
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
@@ -106,7 +105,7 @@ def api_diag():
     betc  = getattr(getattr(cfg, "boardetc",  None), "boardNum", None)
 
     return {
-        "server": SERVER_VERSION,
+        "server": __version__,
         "bridge": BRIDGE_VERSION,
         "have_mcculw": bool(HAVE_MCCULW),
         "have_uldaq": bool(HAVE_ULDAQ),
