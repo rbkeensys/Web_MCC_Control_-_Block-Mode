@@ -4,13 +4,13 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="Improved logging with buffering.  Improved expressions with AO:Name output, added expression execution rate in Hz so heavily loaded loops can execute expressions slower to keep from hanging the UI.">
+    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="Fixed some expression issues, versioning and chart displays of buttonVars">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Boiler Control.json" beforeDir="false" afterPath="$PROJECT_DIR$/Boiler Control.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/app_models.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/app_models.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/config/PID.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/PID.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/config.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/expressions.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/expressions.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/app.js" beforeDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/web/index.html" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -45,25 +45,25 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "Python.MCC Web App.executor": "Run",
-    "Python.mcc_bridge.executor": "Run",
-    "Python.server.executor": "Run",
-    "Python.test_pid_var.executor": "Run",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "RunOnceActivity.typescript.service.memoryLimit.init": "true",
-    "ai.playground.ignore.import.keys.banner.in.settings": "true",
-    "git-widget-placeholder": "use__expressions",
-    "last_opened_file_path": "C:/Users/russ/Desktop/Web MCC App/Fast Bak1/Web-MCC-DAQ-and-Control Fast",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.MCC Web App.executor&quot;: &quot;Run&quot;,
+    &quot;Python.mcc_bridge.executor&quot;: &quot;Run&quot;,
+    &quot;Python.server.executor&quot;: &quot;Run&quot;,
+    &quot;Python.test_pid_var.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.typescript.service.memoryLimit.init&quot;: &quot;true&quot;,
+    &quot;ai.playground.ignore.import.keys.banner.in.settings&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;use__expressions&quot;,
+    &quot;last_opened_file_path&quot;: &quot;C:/Users/russ/Desktop/Web MCC App/Fast Bak1/Web-MCC-DAQ-and-Control Fast&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager">
     <configuration name="MCC Web App" type="PythonConfigurationType" factoryName="Python" temporary="true">
       <module name="Web-MCC-DAQ-and-Control Fast" />
@@ -99,7 +99,6 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-9b0f141eb926-JavaScript-PY-253.29346.142" />
         <option value="bundled-python-sdk-f2b7a9f6281b-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.142" />
       </set>
     </attachedChunks>
@@ -301,7 +300,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769552659043</updated>
     </task>
-    <option name="localTasksCounter" value="23" />
+    <task id="LOCAL-00023" summary="Fixed some expression issues, versioning and chart displays of buttonVars">
+      <option name="closed" value="true" />
+      <created>1769613197393</created>
+      <option name="number" value="00023" />
+      <option name="presentableId" value="LOCAL-00023" />
+      <option name="project" value="LOCAL" />
+      <updated>1769613197393</updated>
+    </task>
+    <option name="localTasksCounter" value="24" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -337,7 +344,8 @@
     <MESSAGE value="Fixed some UI issues, new big TODO: Allowing long math inputs so we can combine many operators including logical and conditional.  This will be two phased." />
     <MESSAGE value="Added preliminary support for multi-input math/LE's.  Fixed some US issues and implementation of LE output.  TODO: add variable SP input to PID's.  Make Math and LE inputs to PID's use names instead of indexes." />
     <MESSAGE value="Improved logging with buffering.  Improved expressions with AO:Name output, added expression execution rate in Hz so heavily loaded loops can execute expressions slower to keep from hanging the UI." />
-    <option name="LAST_COMMIT_MESSAGE" value="Improved logging with buffering.  Improved expressions with AO:Name output, added expression execution rate in Hz so heavily loaded loops can execute expressions slower to keep from hanging the UI." />
+    <MESSAGE value="Fixed some expression issues, versioning and chart displays of buttonVars" />
+    <option name="LAST_COMMIT_MESSAGE" value="Fixed some expression issues, versioning and chart displays of buttonVars" />
   </component>
   <component name="XDebuggerManager">
     <breakpoint-manager>

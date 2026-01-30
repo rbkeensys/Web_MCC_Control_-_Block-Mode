@@ -7,11 +7,13 @@ class Board1608Cfg(BaseModel):
     sampleRateHz: float = 100.0
     blockSize: int = 128
     aiMode: str = "SE"
+    enabled: bool = True  # Allow disabling board
 
 class BoardEtcCfg(BaseModel):
     boardNum: int = 1
     sampleRateHz: float = 10.0
     blockSize: int = 1
+    enabled: bool = True  # Allow disabling board
 
 class AnalogCfg(BaseModel):
     name: str = "AI"
@@ -48,12 +50,32 @@ class ThermocoupleCfg(BaseModel):
     cutoffHz: float = 0.0  # Low-pass filter cutoff frequency (0 = disabled)
 
 class AppConfig(BaseModel):
-    board1608: Board1608Cfg
-    boardetc: BoardEtcCfg
+    # Support both single-board and multi-board formats
+    board1608: Optional[Board1608Cfg] = None
+    boardetc: Optional[BoardEtcCfg] = None
+    boards1608: Optional[List[Board1608Cfg]] = None
+    boardsetc: Optional[List[BoardEtcCfg]] = None
+    
     analogs: List[AnalogCfg]
     digitalOutputs: List[DigitalOutCfg]
     analogOutputs: List[AnalogOutCfg]
     thermocouples: List[ThermocoupleCfg]
+    
+    # Ensure at least one board format is provided
+    def model_post_init(self, __context):
+        # If using single-board format, ensure they exist
+        if self.board1608 is not None and self.boards1608 is None:
+            # Single-board mode - OK
+            pass
+        elif self.boards1608 is not None and self.board1608 is None:
+            # Multi-board mode - OK
+            pass
+        else:
+            # Neither or both - use single-board as fallback
+            if self.board1608 is None:
+                self.board1608 = Board1608Cfg()
+            if self.boardetc is None:
+                self.boardetc = BoardEtcCfg()
 
 class PIDRec(BaseModel):
     enabled: bool = False

@@ -27,8 +27,8 @@
           "type": "pidpanel",
           "x": 184,
           "y": 3,
-          "w": 179,
-          "h": 710,
+          "w": 183,
+          "h": 711,
           "opts": {
             "title": "PID: Flow Control",
             "loopIndex": 0,
@@ -282,7 +282,7 @@
               },
               {
                 "kind": "expr",
-                "index": 7,
+                "index": 0,
                 "name": "raw",
                 "displayScale": 1,
                 "displayOffset": 0
@@ -297,10 +297,10 @@
         {
           "id": "52313a2f-7b74-4042-b804-b2e7cb08a7f1",
           "type": "pidpanel",
-          "x": 7,
+          "x": -2,
           "y": 5,
-          "w": 170,
-          "h": 708,
+          "w": 182,
+          "h": 709,
           "opts": {
             "title": "PID: Level Control",
             "loopIndex": 1,
@@ -310,10 +310,10 @@
         {
           "id": "86a5092c-f25b-4b17-a840-30e44aeea208",
           "type": "pidpanel",
-          "x": 368,
-          "y": 3,
-          "w": 171,
-          "h": 711,
+          "x": 372,
+          "y": 4,
+          "w": 176,
+          "h": 710,
           "opts": {
             "title": "PID: Heat Control",
             "loopIndex": 2,
@@ -325,8 +325,8 @@
           "type": "expr",
           "x": 1992,
           "y": 295,
-          "w": 280,
-          "h": 250,
+          "w": 283,
+          "h": 279,
           "opts": {
             "title": "1:PumpSetpoint",
             "exprIndex": 1,
@@ -339,8 +339,8 @@
           "type": "expr",
           "x": 1996,
           "y": 785,
-          "w": 280,
-          "h": 257,
+          "w": 284,
+          "h": 278,
           "opts": {
             "title": "2:HeaterEnable",
             "exprIndex": 2,
