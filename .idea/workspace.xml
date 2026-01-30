@@ -4,13 +4,14 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="Fixed some expression issues, versioning and chart displays of buttonVars">
+    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="Working on adding multiple board support of any type.  Improved look of gauges and other config editor fixes">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/Boiler Control.json" beforeDir="false" afterPath="$PROJECT_DIR$/Boiler Control.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/app_models.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/app_models.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/PID.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/PID.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server/config/expressions.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/expressions.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/mcc_bridge.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/mcc_bridge.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/server/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/server.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -308,7 +309,15 @@
       <option name="project" value="LOCAL" />
       <updated>1769613197393</updated>
     </task>
-    <option name="localTasksCounter" value="24" />
+    <task id="LOCAL-00024" summary="Working on adding multiple board support of any type.  Improved look of gauges and other config editor fixes">
+      <option name="closed" value="true" />
+      <created>1769805311745</created>
+      <option name="number" value="00024" />
+      <option name="presentableId" value="LOCAL-00024" />
+      <option name="project" value="LOCAL" />
+      <updated>1769805311745</updated>
+    </task>
+    <option name="localTasksCounter" value="25" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -345,18 +354,8 @@
     <MESSAGE value="Added preliminary support for multi-input math/LE's.  Fixed some US issues and implementation of LE output.  TODO: add variable SP input to PID's.  Make Math and LE inputs to PID's use names instead of indexes." />
     <MESSAGE value="Improved logging with buffering.  Improved expressions with AO:Name output, added expression execution rate in Hz so heavily loaded loops can execute expressions slower to keep from hanging the UI." />
     <MESSAGE value="Fixed some expression issues, versioning and chart displays of buttonVars" />
-    <option name="LAST_COMMIT_MESSAGE" value="Fixed some expression issues, versioning and chart displays of buttonVars" />
-  </component>
-  <component name="XDebuggerManager">
-    <breakpoint-manager>
-      <breakpoints>
-        <line-breakpoint enabled="true" suspend="THREAD" type="python-line">
-          <url>file://$PROJECT_DIR$/server/mcc_bridge.py</url>
-          <line>86</line>
-          <option name="timeStamp" value="6" />
-        </line-breakpoint>
-      </breakpoints>
-    </breakpoint-manager>
+    <MESSAGE value="Working on adding multiple board support of any type.  Improved look of gauges and other config editor fixes" />
+    <option name="LAST_COMMIT_MESSAGE" value="Working on adding multiple board support of any type.  Improved look of gauges and other config editor fixes" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/server_py$MCC_Web_App.coverage" NAME="MCC Web App Coverage Results" MODIFIED="1768338813910" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/server" />

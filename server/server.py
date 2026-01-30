@@ -2,7 +2,7 @@
 Version: 1.0.0
 Updated: 2026-01-14 23:30:56
 """
-__version__ = "1.0.4"
+__version__ = "2.0.2"  # LPF debug
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -23,7 +23,12 @@ from mcc_bridge import BRIDGE_VERSION, HAVE_MCCULW, HAVE_ULDAQ
 from pid_core import PIDManager
 from filters import OnePoleLPFBank
 from logger import SessionLogger
-from app_models import AppConfig, PIDFile, ScriptFile, MotorFile, default_config
+from app_models import (
+    AppConfig, get_all_analogs, get_all_digital_outputs,
+    get_all_analog_outputs, get_all_thermocouples,
+    migrate_config_to_board_centric,
+    PIDFile, ScriptFile, MotorFile, default_config
+)
 from motor_controller import MotorManager, list_serial_ports
 from logic_elements import LEManager
 from math_ops import MathOpManager, MathOpFile
@@ -31,6 +36,7 @@ from app_models import LEFile, LogicElementCfg
 from expr_manager import ExpressionManager
 from expr_engine import global_vars as expr_global_vars
 import logging, os, math
+SERVER_VERSION = "2.0.2"  # Debug output + bug fixes  # Added PID execution rate, IF statements, Math outputs
 
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
@@ -105,7 +111,7 @@ def api_diag():
     betc  = getattr(getattr(cfg, "boardetc",  None), "boardNum", None)
 
     return {
-        "server": __version__,
+        "server": SERVER_VERSION,
         "bridge": BRIDGE_VERSION,
         "have_mcculw": bool(HAVE_MCCULW),
         "have_uldaq": bool(HAVE_ULDAQ),
@@ -259,6 +265,13 @@ def _load_json_model(path: Path, model_cls: Type[BaseModel]):
         return model_cls.model_validate({})
 
 app_cfg = _load_json_model(CFG_PATH, AppConfig)
+print(f"[DEBUG] BEFORE migration: boards1608={app_cfg.boards1608 is not None}, board1608={app_cfg.board1608 is not None}")
+app_cfg = migrate_config_to_board_centric(app_cfg)  # Auto-migrate old configs
+print(f"[DEBUG] AFTER migration: boards1608={app_cfg.boards1608 is not None}, num_boards={len(app_cfg.boards1608) if app_cfg.boards1608 else 0}")
+print(f"[DEBUG] After migration: {len(get_all_analogs(app_cfg))} AI channels, {len(get_all_thermocouples(app_cfg))} TC channels")
+if app_cfg.boards1608:
+    for i, board in enumerate(app_cfg.boards1608):
+        print(f"[DEBUG] E-1608 board {i}: boardNum={board.boardNum}, enabled={board.enabled}, AI={len(board.analogs)}, DO={len(board.digitalOutputs)}, AO={len(board.analogOutputs)}")
 pid_file = _load_json_model(PID_PATH, PIDFile)
 script_file = _load_json_model(SCRIPT_PATH, ScriptFile)
 MOTOR_PATH = CFG_DIR / "motor.json"
@@ -341,12 +354,24 @@ lpf_tc = OnePoleLPFBank()
 ws_clients: List[WebSocket] = []
 session_logger: Optional[SessionLogger] = None
 run_task: Optional[asyncio.Task] = None
-acq_rate_hz: float = max(1.0, app_cfg.board1608.sampleRateHz)
+# Get acquisition rate from first enabled E-1608 board
+acq_rate_hz: float = 100.0  # Default
+if app_cfg.boards1608:
+    for board in app_cfg.boards1608:
+        if board.enabled:
+            acq_rate_hz = max(1.0, board.sampleRateHz)
+            break
 _need_reconfig_filters = False
 
 @app.on_event("startup")
 def _on_startup():
     print("[MCC-Hub] FastAPI startup")
+    # Print versions for verification
+    import app_models
+    import mcc_bridge
+    print(f"[VERSIONS] server.py: {SERVER_VERSION}")
+    print(f"[VERSIONS] app_models.py: {getattr(app_models, '__version__', 'unknown')}")
+    print(f"[VERSIONS] mcc_bridge.py: {getattr(mcc_bridge, '__version__', 'unknown')}")
 
 @app.on_event("shutdown")
 def _on_shutdown():
@@ -405,13 +430,16 @@ async def acq_loop():
     last = time.perf_counter()
 
     # Prepare filters from config
+    all_analogs = get_all_analogs(app_cfg)
+    cutoff_list = [a.cutoffHz for a in all_analogs]
+    print(f"[DEBUG] Configuring LPF: {len(all_analogs)} channels, cutoffs={cutoff_list}")
     lpf.configure(
         rate_hz=acq_rate_hz,
-        cutoff_list=[a.cutoffHz for a in app_cfg.analogs],
+        cutoff_list=cutoff_list,
     )
     lpf_tc.configure(
         rate_hz=acq_rate_hz,
-        cutoff_list=[tc.cutoffHz for tc in app_cfg.thermocouples],
+        cutoff_list=[tc.cutoffHz for tc in get_all_thermocouples(app_cfg)],
     )
 
     # Start session logging folder
@@ -430,7 +458,7 @@ async def acq_loop():
         # Set multiple times because hardware may reset to default (often 1V for AO0)
         print("[MCC-Hub] Initializing AOs to startup values...")
         for attempt in range(3):  # Try 3 times
-            for i, ao_cfg in enumerate(app_cfg.analogOutputs):
+            for i, ao_cfg in enumerate(get_all_analog_outputs(app_cfg)):
                 if ao_cfg.include:
                     try:
                         mcc.set_ao(i, ao_cfg.startupV)
@@ -471,11 +499,11 @@ async def acq_loop():
             if _need_reconfig_filters:
                 lpf.configure(
                     rate_hz=acq_rate_hz,
-                    cutoff_list=[a.cutoffHz for a in app_cfg.analogs],
+                    cutoff_list=[a.cutoffHz for a in get_all_analogs(app_cfg)],
                 )
                 lpf_tc.configure(
                     rate_hz=acq_rate_hz,
-                    cutoff_list=[tc.cutoffHz for tc in app_cfg.thermocouples],
+                    cutoff_list=[tc.cutoffHz for tc in get_all_thermocouples(app_cfg)],
                 )
                 _need_reconfig_filters = False
                 print(f"[MCC-Hub] Reconfigured LPF for rate {acq_rate_hz} Hz")
@@ -501,7 +529,7 @@ async def acq_loop():
             tc_vals: List[float] = []
             for i, raw in enumerate(last_tc_vals):
                 try:
-                    offset = app_cfg.thermocouples[i].offset if i < len(app_cfg.thermocouples) else 0.0
+                    offset = get_all_thermocouples(app_cfg)[i].offset if i < len(get_all_thermocouples(app_cfg)) else 0.0
                     val = raw + offset
                     val = lpf_tc.apply(i, val)
                     tc_vals.append(val)
@@ -512,8 +540,8 @@ async def acq_loop():
             ai_scaled: List[float] = []
             for i, raw in enumerate(ai_raw):
                 try:
-                    m = app_cfg.analogs[i].slope
-                    b = app_cfg.analogs[i].offset
+                    m = get_all_analogs(app_cfg)[i].slope
+                    b = get_all_analogs(app_cfg)[i].offset
                 except Exception:
                     m, b = 1.0, 0.0
                 y = m * raw + b
@@ -581,7 +609,7 @@ async def acq_loop():
             # --- Expressions ---
             # Evaluate expressions after everything else so they can see all signal states
             try:
-                tc_count = len(app_cfg.thermocouples) if app_cfg.thermocouples else 0
+                tc_count = len(get_all_thermocouples(app_cfg)) if get_all_thermocouples(app_cfg) else 0
                 expr_tel = expr_mgr.evaluate_all({
                     "ai": ai_scaled,
                     "ao": ao,
@@ -592,10 +620,10 @@ async def acq_loop():
                     "le": le_tel,
                     "expr": last_expr_outputs,  # Previous cycle expressions (avoid circular dependency)
                     "buttonVars": button_vars,  # Button variables from frontend
-                    "ai_list": [{"name": ch.name} for ch in app_cfg.analogs],
-                    "ao_list": [{"name": ch.name} for ch in app_cfg.analogOutputs],
-                    "tc_list": [{"name": ch.name} for ch in app_cfg.thermocouples],
-                    "do_list": [{"name": ch.name} for ch in app_cfg.digitalOutputs],
+                    "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
+                    "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
+                    "tc_list": [{"name": ch.name} for ch in get_all_thermocouples(app_cfg)],
+                    "do_list": [{"name": ch.name} for ch in get_all_digital_outputs(app_cfg)],
                     "pid_list": [{"name": loop.name} for loop in pid_mgr.meta],
                     "math_list": [{"name": op.name} for op in math_mgr.operators],
                     "le_list": [{"name": elem.name} for elem in le_mgr.elements],
@@ -631,7 +659,7 @@ async def acq_loop():
             # Check gates and apply/restore values as needed
             global ao_desired_values, ao_last_gate_state
             
-            for i, ao_cfg in enumerate(app_cfg.analogOutputs):
+            for i, ao_cfg in enumerate(get_all_analog_outputs(app_cfg)):
                 if not ao_cfg.include:
                     continue
                     
@@ -789,6 +817,10 @@ async def acq_loop():
                     # Don't let formatting kill the loop
                     pass
 
+    except Exception as e:
+        print(f"[MCC-Hub] ACQUISITION LOOP ERROR: {e}")
+        import traceback
+        traceback.print_exc()
     finally:
         print("[MCC-Hub] Acquisition loop stopping")
 
@@ -855,14 +887,14 @@ def check_expression_syntax(body: dict):
     
     # Build test signal state with current config
     test_state = {
-        'ai_list': [{'name': ch.name} for ch in app_cfg.analogs],
-        'ai': [0.0] * len(app_cfg.analogs),
-        'ao_list': [{'name': ch.name} for ch in (app_cfg.analogOutputs or [])],
-        'ao': [0.0] * len(app_cfg.analogOutputs or []),
-        'tc_list': [{'name': tc.name} for tc in (app_cfg.thermocouples or [])],
-        'tc': [0.0] * len(app_cfg.thermocouples or []),
-        'do_list': [{'name': ch.name} for ch in (app_cfg.digitalOutputs or [])],
-        'do': [0] * len(app_cfg.digitalOutputs or []),
+        'ai_list': [{'name': ch.name} for ch in get_all_analogs(app_cfg)],
+        'ai': [0.0] * len(get_all_analogs(app_cfg)),
+        'ao_list': [{'name': ch.name} for ch in (get_all_analog_outputs(app_cfg) or [])],
+        'ao': [0.0] * len(get_all_analog_outputs(app_cfg) or []),
+        'tc_list': [{'name': tc.name} for tc in (get_all_thermocouples(app_cfg) or [])],
+        'tc': [0.0] * len(get_all_thermocouples(app_cfg) or []),
+        'do_list': [{'name': ch.name} for ch in (get_all_digital_outputs(app_cfg) or [])],
+        'do': [0] * len(get_all_digital_outputs(app_cfg) or []),
         'pid_list': [{'name': loop.name} for loop in (pid_mgr.meta if pid_mgr else [])],
         'pid': [{'out': 0, 'u': 0, 'pv': 0, 'target': 0, 'err': 0}] * len(pid_mgr.meta if pid_mgr else []),
         'math_list': [{'name': op.name} for op in math_mgr.operators],
@@ -1039,7 +1071,14 @@ def set_rate(req: RateReq):
     # This keeps the hardware sampling in sync with the logical acq_rate_hz,
     # while still using block-based reads under the hood for performance.
     try:
-        mcc.configure_ai_scan(acq_rate_hz, app_cfg.board1608.blockSize)
+        # Get blockSize from first enabled E-1608 board
+        blockSize = 128  # Default
+        if app_cfg.boards1608:
+            for board in app_cfg.boards1608:
+                if board.enabled:
+                    blockSize = board.blockSize
+                    break
+        mcc.configure_ai_scan(acq_rate_hz, blockSize)
     except Exception as e:
         print(f"[MCC-Hub] AI scan reconfig warn: {e}")
 
@@ -1098,7 +1137,7 @@ def set_ao(req: AOReq):
         ao_desired_values[req.index] = req.volts
     
     # Check if this AO has enable gating
-    ao_cfg = app_cfg.analogOutputs[req.index] if req.index < len(app_cfg.analogOutputs) else None
+    ao_cfg = get_all_analog_outputs(app_cfg)[req.index] if req.index < len(get_all_analog_outputs(app_cfg)) else None
     
     if ao_cfg and ao_cfg.enable_gate:
         # Check the gate signal
@@ -1137,7 +1176,7 @@ async def zero_ai_channels(req: dict):
     
     # Validate channels
     for ch in channels:
-        if ch < 0 or ch >= len(app_cfg.analogs):
+        if ch < 0 or ch >= len(get_all_analogs(app_cfg)):
             return {"ok": False, "error": f"Invalid channel index: {ch}"}
     
     # Collect samples at 100Hz for averaging_period
@@ -1153,7 +1192,7 @@ async def zero_ai_channels(req: dict):
         for ch in channels:
             if ch < len(ai_raw):
                 # Apply current slope and offset to get scaled value
-                cfg = app_cfg.analogs[ch]
+                cfg = get_all_analogs(app_cfg)[ch]
                 scaled = cfg.slope * ai_raw[ch] + cfg.offset
                 samples[ch].append(scaled)
         
@@ -1166,12 +1205,12 @@ async def zero_ai_channels(req: dict):
             return {"ok": False, "error": f"No valid samples for channel {ch}"}
         
         avg = sum(samples[ch]) / len(samples[ch])
-        old_offset = app_cfg.analogs[ch].offset
+        old_offset = get_all_analogs(app_cfg)[ch].offset
         
         # New offset = old_offset - (average - balance_to_value)
         new_offset = old_offset - (avg - balance_to_value)
         
-        app_cfg.analogs[ch].offset = new_offset
+        get_all_analogs(app_cfg)[ch].offset = new_offset
         offsets_list.append({
             "channel": ch,
             "old": old_offset,
