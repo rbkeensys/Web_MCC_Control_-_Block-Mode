@@ -71,6 +71,12 @@
       "enabled": true,
       "expression": "// Calculate Flow\npumpOutPress = \"AI:DP Flow 1\"\nstatic.DPFlow1 = pumpOutPress\n\ninletPress   = \"AI:DP Flow 2\"\nstatic.DPFlow2 = inletPress\n\nDPSum = pumpOutPress - inletPress\nrawF = sqrt(abs(pumpOutPress - inletPress))*0.056\nif (DPSum > 0) THEN\n    flow = rawF\nELSE\n    flow = -rawF\nENDIF\nstatic.flow = flow",
       "execution_rate_hz": 25
+    },
+    {
+      "name": "Spark",
+      "enabled": true,
+      "expression": "static.sparkCount\nbutton = buttonVars.sparkON\nIF static.sparkCount >= 1 THEN\n    static.sparkCount = 0\n    IF button==1 THEN\n       \"DO:Spark\" = 1\n    ELSE\n       \"DO:Spark\" = 0\n    ENDIF\nELSE\n    static.sparkCount = static.sparkCount + 1\n    \"DO:Spark\" = 0\nENDIF\n\ncount = static.sparkCount\nspark = \"DO:Spark\"",
+      "execution_rate_hz": null
     }
   ]
 }

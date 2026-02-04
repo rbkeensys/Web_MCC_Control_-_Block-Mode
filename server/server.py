@@ -2,7 +2,7 @@
 Version: 1.0.0
 Updated: 2026-01-14 23:30:56
 """
-__version__ = "2.0.3"  # Fixed zero_ai for multi-board
+__version__ = "2.0.8"  # Save sample rate to config
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -36,7 +36,7 @@ from app_models import LEFile, LogicElementCfg
 from expr_manager import ExpressionManager
 from expr_engine import global_vars as expr_global_vars
 import logging, os, math
-SERVER_VERSION = "2.0.3"  # Debug output + bug fixes  # Added PID execution rate, IF statements, Math outputs
+SERVER_VERSION = "2.0.8"  # Debug output + bug fixes  # Added PID execution rate, IF statements, Math outputs
 
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
@@ -628,7 +628,7 @@ async def acq_loop():
                     "math_list": [{"name": op.name} for op in math_mgr.operators],
                     "le_list": [{"name": elem.name} for elem in le_mgr.elements],
                     "expr_list": [{"name": expr.name} for expr in expr_mgr.expressions]
-                })
+                }, bridge=mcc, sample_rate_hz=acq_rate_hz)  # CRITICAL: Pass bridge for hardware writes!
                 
                 # Extract expr outputs for use in PID gates and other systems
                 expr_outputs = [e.get("output", 0.0) for e in expr_tel]
@@ -1063,9 +1063,24 @@ def get_motor_status(index: int):
 
 @app.post("/api/acq/rate")
 def set_rate(req: RateReq):
-    global acq_rate_hz, _need_reconfig_filters
+    global acq_rate_hz, _need_reconfig_filters, app_cfg
     acq_rate_hz = max(1.0, float(req.hz))
     _need_reconfig_filters = True
+
+    # Save rate to config for all enabled boards
+    if app_cfg.boards1608:
+        for board in app_cfg.boards1608:
+            if board.enabled:
+                board.sampleRateHz = acq_rate_hz
+        
+        # Save config to disk
+        try:
+            CFG_PATH.write_text(json.dumps(app_cfg.model_dump(), indent=2))
+            print(f"[MCC-Hub] Rate set to {acq_rate_hz} Hz and saved to config")
+        except Exception as e:
+            print(f"[MCC-Hub] Rate set to {acq_rate_hz} Hz but failed to save: {e}")
+    else:
+        print(f"[MCC-Hub] Rate set to {acq_rate_hz} Hz (not saved - no boards)")
 
     # Reconfigure the E-1608 AI block scan to match the new acquisition rate.
     # This keeps the hardware sampling in sync with the logical acq_rate_hz,
@@ -1078,11 +1093,10 @@ def set_rate(req: RateReq):
                 if board.enabled:
                     blockSize = board.blockSize
                     break
-        mcc.configure_ai_scan(acq_rate_hz, blockSize)
+        # Note: configure_ai_scan not needed for individual channel reads
     except Exception as e:
         print(f"[MCC-Hub] AI scan reconfig warn: {e}")
 
-    print(f"[MCC-Hub] Rate set to {acq_rate_hz} Hz")
     return {"ok": True, "hz": acq_rate_hz}
 
 @app.post("/api/do/set")
@@ -1095,15 +1109,17 @@ def set_do(req: DOReq):
     # Check if this DO is gated by a logic element
     try:
         cfg = mcc.cfg
-        if cfg is not None and idx < len(cfg.digitalOutputs):
-            do_cfg = cfg.digitalOutputs[idx]
-            le_index = getattr(do_cfg, "logicElement", None)
-            
-            if le_index is not None and 0 <= le_index < len(le_mgr.outputs):
-                le_output = le_mgr.get_output(le_index)
-                if not le_output:
-                    log.info(f"[DO] DO{idx} blocked by LE{le_index} (LE output is False)")
-                    return {"ok": False, "reason": f"Blocked by LE{le_index}"}
+        if cfg is not None:
+            all_dos = get_all_digital_outputs(cfg)
+            if idx < len(all_dos):
+                do_cfg = all_dos[idx]
+                le_index = getattr(do_cfg, "logicElement", None)
+                
+                if le_index is not None and 0 <= le_index < len(le_mgr.outputs):
+                    le_output = le_mgr.get_output(le_index)
+                    if not le_output:
+                        log.info(f"[DO] DO{idx} blocked by LE{le_index} (LE output is False)")
+                        return {"ok": False, "reason": f"Blocked by LE{le_index}"}
     except Exception as e:
         log.error(f"[DO] Error checking LE gate: {e}")
     
@@ -1233,8 +1249,27 @@ async def zero_ai_channels(req: dict):
         if not found:
             print(f"[Zero AI] WARNING: Could not find board for channel {ch}")
     
+    # Debug: Check if changes are in the model
+    print(f"[Zero AI] Before save - checking offsets in app_cfg:")
+    for ch in channels:
+        global_idx = ch
+        for board in app_cfg.boards1608:
+            if not board.enabled:
+                continue
+            if global_idx < len(board.analogs):
+                print(f"  CH{ch} -> board #{board.boardNum}, analog[{global_idx}].offset = {board.analogs[global_idx].offset}")
+                break
+            else:
+                global_idx -= len(board.analogs)
+    
     # Save config
-    CFG_PATH.write_text(json.dumps(app_cfg.model_dump(), indent=2))
+    config_dict = app_cfg.model_dump()
+    CFG_PATH.write_text(json.dumps(config_dict, indent=2))
+    print(f"[Zero AI] Config saved to {CFG_PATH}")
+    
+    # Verify save
+    saved_text = CFG_PATH.read_text()
+    print(f"[Zero AI] Saved config size: {len(saved_text)} bytes")
     
     return {"ok": True, "offsets": offsets_list}
 

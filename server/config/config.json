@@ -2,7 +2,7 @@
   "boards1608": [
     {
       "boardNum": 0,
-      "sampleRateHz": 100.0,
+      "sampleRateHz": 65.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -24,10 +24,10 @@
           "include": true
         },
         {
-          "name": "DP Level 1",
-          "slope": 50.0,
-          "offset": -24.850616455078125,
-          "cutoffHz": 0.1,
+          "name": "DewarP",
+          "slope": 2.9,
+          "offset": -1.5121188354492188,
+          "cutoffHz": 1.0,
           "units": "psi",
           "include": true
         },
@@ -171,16 +171,16 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 100.0,
+      "sampleRateHz": 65.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
       "analogs": [
         {
           "name": "Scale",
-          "slope": 5.7475,
-          "offset": -12.996860618591308,
-          "cutoffHz": 0.5,
+          "slope": 12.964544166584048,
+          "offset": -14.438089951924185,
+          "cutoffHz": 1.0,
           "units": "grams",
           "include": true
         },
@@ -243,7 +243,7 @@
       ],
       "digitalOutputs": [
         {
-          "name": "DO0",
+          "name": "Spark",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
