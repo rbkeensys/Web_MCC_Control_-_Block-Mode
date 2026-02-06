@@ -5,7 +5,7 @@
       "sampleRateHz": 65.0,
       "blockSize": 128,
       "aiMode": "SE",
-      "enabled": true,
+      "enabled": false,
       "analogs": [
         {
           "name": "DP Flow 1",
@@ -80,7 +80,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO1",
@@ -89,7 +90,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "HeaterRelay",
@@ -98,7 +100,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO3",
@@ -107,7 +110,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO4",
@@ -116,7 +120,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO5",
@@ -125,7 +130,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO6",
@@ -134,7 +140,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "Heat_Button",
@@ -143,7 +150,8 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         }
       ],
       "analogOutputs": [
@@ -171,7 +179,7 @@
     },
     {
       "boardNum": 2,
-      "sampleRateHz": 65.0,
+      "sampleRateHz": 200.0,
       "blockSize": 128,
       "aiMode": "SE",
       "enabled": true,
@@ -180,7 +188,7 @@
           "name": "Scale",
           "slope": 12.964544166584048,
           "offset": -14.438089951924185,
-          "cutoffHz": 1.0,
+          "cutoffHz": 0.0,
           "units": "grams",
           "include": true
         },
@@ -249,16 +257,18 @@
           "actuationTime": 0.0,
           "include": true,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": true
         },
         {
           "name": "DO1",
           "normallyOpen": false,
           "momentary": false,
           "actuationTime": 0.0,
-          "include": true,
+          "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO2",
@@ -267,7 +277,8 @@
           "actuationTime": 0.0,
           "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO3",
@@ -276,7 +287,8 @@
           "actuationTime": 0.0,
           "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO4",
@@ -285,7 +297,8 @@
           "actuationTime": 0.0,
           "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO5",
@@ -294,7 +307,8 @@
           "actuationTime": 0.0,
           "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO6",
@@ -303,7 +317,8 @@
           "actuationTime": 0.0,
           "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         },
         {
           "name": "DO7",
@@ -312,7 +327,8 @@
           "actuationTime": 0.0,
           "include": false,
           "logicElement": null,
-          "mode": "toggle"
+          "mode": "toggle",
+          "blocking": false
         }
       ],
       "analogOutputs": [
@@ -344,7 +360,7 @@
       "boardNum": 1,
       "sampleRateHz": 10.0,
       "blockSize": 1,
-      "enabled": true,
+      "enabled": false,
       "thermocouples": [
         {
           "include": true,

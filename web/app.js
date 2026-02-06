@@ -1,4 +1,4 @@
-const UI_VERSION = "1.7.6";  // Duration support for ALL event types  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
+const UI_VERSION = "1.4.3";  // Fixed createSignalSelector  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -441,7 +441,6 @@ let scriptIndex = 0;
 let scriptPaused = false;
 let scriptStartTime = 0;
 let scriptLog = []; // Keep a log of executed events
-let scriptDurationTimers = {}; // Track duration timers per output: {type:channel -> timerId}
 
 async function loadScript(){
   try {
@@ -530,7 +529,6 @@ async function executeScriptEvent(evt){
       const duration = evt.duration || 0;
 
       console.log(`[Script] DO${channel}: ${state ? 'ON' : 'OFF'} (${activeHigh ? 'NO' : 'NC'})${duration > 0 ? `, duration ${duration}s` : ''}`);
-      console.log(`[Script] Event details:`, {channel, state, activeHigh, duration, evt});
 
       const response = await fetch('/api/do/set', {
         method: 'POST',
@@ -549,21 +547,11 @@ async function executeScriptEvent(evt){
 
       console.log(`[Script] ✓ DO${channel} set to ${state}`);
 
-      // Cancel any pending duration timer for this DO
-      const doKey = `DO:${channel}`;
-      if (scriptDurationTimers[doKey]) {
-        clearTimeout(scriptDurationTimers[doKey]);
-        delete scriptDurationTimers[doKey];
-        console.log(`[Script] Cancelled previous duration timer for DO${channel}`);
-      }
-      
       // If duration > 0, schedule the off event
       if (duration > 0) {
         console.log(`[Script] Scheduling DO${channel} OFF in ${duration}s`);
-        scriptDurationTimers[doKey] = setTimeout(async () => {
+        setTimeout(async () => {
           console.log(`[Script] Duration expired: DO${channel} -> OFF`);
-          delete scriptDurationTimers[doKey];
-          
           const offResponse = await fetch('/api/do/set', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -602,115 +590,6 @@ async function executeScriptEvent(evt){
       }
 
       console.log(`[Script] ✓ AO${channel} set to ${volts}V`);
-      
-      // Handle duration for AO
-      const aoKey = `AO:${channel}`;
-      if (scriptDurationTimers[aoKey]) {
-        clearTimeout(scriptDurationTimers[aoKey]);
-        delete scriptDurationTimers[aoKey];
-        console.log(`[Script] Cancelled previous duration timer for AO${channel}`);
-      }
-      
-      const duration = evt.duration || 0;
-      if (duration > 0) {
-        console.log(`[Script] Scheduling AO${channel} reset to 0V in ${duration}s`);
-        scriptDurationTimers[aoKey] = setTimeout(async () => {
-          console.log(`[Script] Duration expired: AO${channel} -> 0V`);
-          delete scriptDurationTimers[aoKey];
-          
-          await fetch('/api/ao/set', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({index: channel, volts: 0})
-          });
-          console.log(`[Script] ✓ AO${channel} duration reset complete`);
-        }, duration * 1000);
-      }
-      
-    } else if (evt.type === 'buttonVar') {
-      const varName = evt.varName || 'button1';
-      const value = evt.value || 0;
-      
-      console.log(`[Script] buttonVar.${varName}: ${value}`);
-      
-      // Update local state
-      if (!state.buttonVars) state.buttonVars = {};
-      state.buttonVars[varName] = value;
-      
-      // Sync to backend
-      const response = await fetch('/api/button_vars', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({vars: state.buttonVars})
-      });
-      
-      if (!response.ok) {
-        console.error('[Script] buttonVar set failed:', await response.text());
-        return;
-      }
-      
-      console.log(`[Script] ✓ buttonVar.${varName} set to ${value}`);
-      
-      // Handle duration for buttonVar
-      const bvKey = `buttonVar:${varName}`;
-      if (scriptDurationTimers[bvKey]) {
-        clearTimeout(scriptDurationTimers[bvKey]);
-        delete scriptDurationTimers[bvKey];
-        console.log(`[Script] Cancelled previous duration timer for buttonVar.${varName}`);
-      }
-      
-      const duration = evt.duration || 0;
-      if (duration > 0) {
-        console.log(`[Script] Scheduling buttonVar.${varName} reset to 0 in ${duration}s`);
-        scriptDurationTimers[bvKey] = setTimeout(async () => {
-          console.log(`[Script] Duration expired: buttonVar.${varName} -> 0`);
-          delete scriptDurationTimers[bvKey];
-          
-          // Reset to 0
-          if (!state.buttonVars) state.buttonVars = {};
-          state.buttonVars[varName] = 0;
-          
-          await fetch('/api/button_vars', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({vars: state.buttonVars})
-          });
-          console.log(`[Script] ✓ buttonVar.${varName} duration reset complete`);
-        }, duration * 1000);
-      }
-      
-    } else if (evt.type === 'var') {
-      const varName = evt.varName || 'var1';
-      const value = evt.value || 0;
-      
-      console.log(`[Script] var.${varName}: ${value}`);
-      
-      // Update global vars (same as expressions use)
-      if (!window.scriptVars) window.scriptVars = {};
-      window.scriptVars[varName] = value;
-      
-      console.log(`[Script] ✓ var.${varName} set to ${value}`);
-      
-      // Handle duration for var
-      const vKey = `var:${varName}`;
-      if (scriptDurationTimers[vKey]) {
-        clearTimeout(scriptDurationTimers[vKey]);
-        delete scriptDurationTimers[vKey];
-        console.log(`[Script] Cancelled previous duration timer for var.${varName}`);
-      }
-      
-      const duration = evt.duration || 0;
-      if (duration > 0) {
-        console.log(`[Script] Scheduling var.${varName} reset to 0 in ${duration}s`);
-        scriptDurationTimers[vKey] = setTimeout(() => {
-          console.log(`[Script] Duration expired: var.${varName} -> 0`);
-          delete scriptDurationTimers[vKey];
-          
-          if (!window.scriptVars) window.scriptVars = {};
-          window.scriptVars[varName] = 0;
-          console.log(`[Script] ✓ var.${varName} duration reset complete`);
-        }, duration * 1000);
-      }
     }
   } catch(e) {
     console.error('[Script] Event execution failed:', e, 'Event:', evt);
@@ -729,13 +608,6 @@ function stopScript(){
     clearTimeout(scriptTimer);
     scriptTimer = null;
   }
-  
-  // Cancel all pending duration timers
-  for (const key in scriptDurationTimers) {
-    clearTimeout(scriptDurationTimers[key]);
-  }
-  scriptDurationTimers = {};
-  
   scriptIndex = 0;
   scriptPaused = false;
   scriptStartTime = 0;
@@ -1090,24 +962,7 @@ function updateConnectBtn(){
 }
 
 async function loadConfigCache(){
-  try { 
-    const r=await fetch('/api/config'); 
-    if (r.ok) {
-      configCache = await r.json();
-      
-      // Update rate input from config
-      const rateInput = $('#rate');
-      if (rateInput && configCache && configCache.boards1608) {
-        for (let board of configCache.boards1608) {
-          if (board.enabled && board.sampleRateHz) {
-            rateInput.value = board.sampleRateHz;
-            console.log(`[Config] Loaded sample rate: ${board.sampleRateHz} Hz`);
-            break;
-          }
-        }
-      }
-    }
-  } catch {}
+  try { const r=await fetch('/api/config'); if (r.ok) configCache = await r.json(); } catch {}
   try { const r=await fetch('/api/pid'); if (r.ok) window.pidCache = await r.json(); } catch {}
 }
 
@@ -1129,6 +984,10 @@ function connect(){
     const msg=JSON.parse(ev.data);
     if(msg.type==='session'){ sessionDir=msg.dir; $('#session').textContent=sessionDir; }
     if (msg.type === 'tick') feedTick(msg);
+    if (msg.type === 'batch' && msg.samples && msg.samples.length > 0) {
+      // Feed the last sample from the batch (most recent data)
+      feedTick(msg.samples[msg.samples.length - 1]);
+    }
   };
   updateConnectBtn();
 }
@@ -1963,16 +1822,7 @@ function openWidgetSettings(w) {
       ];
       
       if (isDO) {
-        // Create DO selector with channel names
-        const doSelect = el('select', {});
-        const allDOs = getAllDigitalOutputs(configCache);
-        allDOs.forEach((doChannel, idx) => {
-          doSelect.append(el('option', {value: idx}, `DO${idx}: ${doChannel.name || 'Unnamed'}`));
-        });
-        doSelect.value = w.opts.doIndex || 0;
-        doSelect.onchange = () => w.opts.doIndex = parseInt(doSelect.value);
-        
-        rows.push(['DO Channel', doSelect]);
+        rows.push(['DO Index', inputNum(w.opts, 'doIndex', 1)]);
         rows.push(['Active High', inputChk(w.opts, 'activeHigh')]);
       } else {
         const varInput = el('input', {type: 'text', value: w.opts.varName || 'button1'});
@@ -2993,54 +2843,49 @@ function mountGauge(w, body){
       className: 'btn',
       style: 'position:absolute;top:4px;left:50%;transform:translateX(-50%);font-size:11px;padding:4px 8px;z-index:10;background:#4a9eff;color:#0d1117',
       onclick: async () => {
-        if (tareBtn.disabled) return;
+        if (tareBtn.disabled) return; // Prevent double-click
         
         tareBtn.disabled = true;
         tareBtn.textContent = 'Taring...';
         
         try {
-          // Get AI channels to zero
+          // Collect samples for 2 seconds
+          const samples = {};
           const needles = w.opts.needles || [];
-          const aiChannels = [];
+          needles.forEach((needle, idx) => {
+            samples[idx] = [];
+          });
           
-          needles.forEach(needle => {
-            if (needle.kind === 'ai' && Number.isInteger(needle.index)) {
-              aiChannels.push(needle.index);
+          const sampleInterval = setInterval(() => {
+            needles.forEach((needle, idx) => {
+              const v = readSelection(needle);
+              if (Number.isFinite(v)) {
+                samples[idx].push(v);
+              }
+            });
+          }, 50); // Sample at 20 Hz
+          
+          // Wait 2 seconds
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          clearInterval(sampleInterval);
+          
+          // Calculate averages and store as tare offsets
+          w.opts.tareOffsets = {};
+          needles.forEach((needle, idx) => {
+            if (samples[idx].length > 0) {
+              const avg = samples[idx].reduce((a, b) => a + b, 0) / samples[idx].length;
+              w.opts.tareOffsets[idx] = -avg; // Negative to zero it out
+              console.log(`[GAUGE] Needle ${idx} tared: avg=${avg.toFixed(3)}, offset=${w.opts.tareOffsets[idx].toFixed(3)}`);
             }
           });
           
-          if (aiChannels.length === 0) {
-            alert('No AI channels to tare in this gauge');
-            return;
-          }
-          
-          // Call server zero API to update config offsets
-          const resp = await fetch('/api/zero_ai', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-              channels: aiChannels,
-              averaging_period: 2.0,
-              balance_to_value: 0.0
-            })
-          });
-          
-          const result = await resp.json();
-          
-          if (result.ok) {
-            // Clear widget-level tare offsets since config is updated
-            delete w.opts.tareOffsets;
-            // No need to save layout - config is already updated on server
-            
-            alert(`Tared ${aiChannels.length} channel(s). Config offsets updated!`);
-          } else {
-            alert('Tare failed: ' + (result.error || 'Unknown error'));
-          }
+          // Save layout to persist tare offsets
+          saveLayout();
           
         } catch(e) {
           console.error('[GAUGE] Tare error:', e);
-          alert('Tare failed: ' + e.message);
         } finally {
+          // Always re-enable button
           tareBtn.disabled = false;
           tareBtn.textContent = 'Tare';
         }
@@ -3288,7 +3133,6 @@ function mountBars(w, body){
 function logicalActive(bit,activeHigh){ return activeHigh ? !!bit : !bit; }
 
 function mountDOButton(w, body){
-  console.log(`[DO Button] Mounting widget "${w.opts.title}": DO${w.opts.doIndex}, activeHigh=${w.opts.activeHigh}`);
   const b=el('button',{className:'do-btn default'}, w.opts.title||'Button');
   body.append(b);
 
@@ -3323,13 +3167,10 @@ function mountDOButton(w, body){
     } else {
       // Set DO hardware
       try{
-        // NOTE: We send active_high=true always because we already converted
-        // the logical state to physical bit above. The server should not
-        // apply activeHigh logic again.
         await fetch('/api/do/set',{
           method:'POST',
           headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({index:w.opts.doIndex, state:!!value, active_high:true})
+          body:JSON.stringify({index:w.opts.doIndex, state:!!value, active_high:!!w.opts.activeHigh})
         });
       }catch(e){ console.warn('DO set failed', e); }
     }
@@ -3371,24 +3212,12 @@ function mountDOButton(w, body){
     let bit;
     if (w.opts.outputType === 'var') {
       bit = state.buttonVars?.[w.opts.varName] || 0;
-      const want = !bit;
-      await setOutput(want);
     } else {
-      // Hardware DO: Toggle the LOGICAL state (what user sees)
       bit = state.do[w.opts.doIndex]|0;
-      const currentLogicalState = logicalActive(bit, w.opts.activeHigh);
-      const desiredLogicalState = !currentLogicalState;
-      
-      console.log(`[DO Click] DO${w.opts.doIndex}: bit=${bit}, activeHigh=${w.opts.activeHigh}, currentLogical=${currentLogicalState}, want=${desiredLogicalState}`);
-      
-      // Convert desired logical state back to physical bit
-      // If activeHigh=true:  logical true  = bit 1, logical false = bit 0
-      // If activeHigh=false: logical true  = bit 0, logical false = bit 1
-      const physicalBit = w.opts.activeHigh ? (desiredLogicalState ? 1 : 0) : (desiredLogicalState ? 0 : 1);
-      
-      console.log(`[DO Click] Sending physical bit=${physicalBit} (number) to server`);
-      await setOutput(physicalBit);
     }
+    
+    const want=!bit;
+    await setOutput(want);
     
     const ms = Math.max(0, (w.opts.actuationTime||0)*1000);
     if (ms>0){
@@ -3444,32 +3273,13 @@ function updateDOButtons(){
       bit = state.buttonVars?.[w.opts.varName] || 0;
       active = !!bit;  // 1 = true = active
     } else {
-      // Hardware DOs: interpret physical state based on activeHigh setting
+      // Hardware DOs: respect active-high setting for relay inversion
       bit = state.do[w.opts.doIndex]|0;
-      const activeHighSetting = !!w.opts.activeHigh;
-      
-      // CRITICAL: Button color should represent the LOGICAL state the user cares about
-      // activeHigh=true:  bit 1 = device ON = GREEN,  bit 0 = device OFF = RED
-      // activeHigh=false: bit 0 = device ON = GREEN,  bit 1 = device OFF = RED
-      active = logicalActive(bit, activeHighSetting);
-      
-      // Enhanced debug
-      if (w.debugCount === undefined) w.debugCount = 0;
-      if (w.debugCount < 8) {
-        const physicalBit = bit ? '1(HIGH)' : '0(LOW)';
-        const logicalState = active ? 'ON' : 'OFF';
-        const color = active ? 'GREEN' : 'RED';
-        console.log(`[DO Button "${w.opts.title}"] DO${w.opts.doIndex}: bit=${physicalBit}, activeHigh=${activeHighSetting}, => ${logicalState} (${color})`);
-        w.debugCount++;
-      }
+      active = logicalActive(bit, !!w.opts.activeHigh);
     }
     
-    // Map logical state to color: ON=green, OFF=red
-    const newClass = 'do-btn ' + (active ? 'active' : 'inactive');
-    if (b.className !== newClass && w.debugCount < 8) {
-      console.log(`[DO Button "${w.opts.title}"] Class: "${b.className}" -> "${newClass}"`);
-    }
-    b.className = newClass;
+    // Standard mapping: active=green, inactive=red
+    b.className='do-btn '+(active?'active':'inactive');
     b.textContent = w.opts.title || 'Button';
   });
 }
@@ -6105,327 +5915,6 @@ async function openMathEditor(){
   showModal(root);
 }
 
-
-async function openCalibrateAIDialog() {
-  const cfg = await (await fetch('/api/config')).json();
-  const analogs = getAllAnalogs(cfg);
-  
-  const root = el('div', {});
-  const title = el('h2', {}, 'Calibrate AI Channel');
-  const subtitle = el('p', {style: 'color:#a8b3cf;margin-bottom:16px'}, 
-    'Two-point calibration: Measure at two known values to calculate slope and offset.');
-  
-  // Channel selection
-  const channelSelect = el('select', {style: 'width:200px;margin-bottom:16px'});
-  analogs.forEach((ai, idx) => {
-    channelSelect.append(el('option', {value: idx}, `AI${idx}: ${ai.name || 'Unnamed'}`));
-  });
-  
-  // Averaging period input
-  const avgInput = el('input', {
-    type: 'number',
-    min: 0.5,
-    max: 10,
-    step: 0.5,
-    value: 2.0,
-    style: 'width:80px;margin-left:8px'
-  });
-  
-  // Calibration points
-  let points = [
-    {reference: 0, measured: null, averaging: false},
-    {reference: 0, measured: null, averaging: false}
-  ];
-  
-  const pointsDiv = el('div', {style: 'margin:16px 0'});
-  
-  function updatePointsUI() {
-    pointsDiv.innerHTML = '';
-    
-    points.forEach((pt, idx) => {
-      const row = el('div', {
-        style: 'display:flex;gap:12px;align-items:center;padding:12px;background:#1a1d2e;border-radius:6px;margin:8px 0'
-      });
-      
-      const pointLabel = el('div', {
-        style: 'min-width:80px;font-weight:600;color:#79c0ff'
-      }, `Point ${idx + 1}:`);
-      
-      const refLabel = el('label', {style: 'display:flex;align-items:center;gap:6px'}, [
-        el('span', {style: 'color:#9094a1'}, 'Reference:'),
-        el('input', {
-          type: 'number',
-          step: 'any',
-          value: pt.reference,
-          style: 'width:100px',
-          oninput: (e) => pt.reference = parseFloat(e.target.value) || 0
-        })
-      ]);
-      
-      const measuredLabel = el('label', {style: 'display:flex;align-items:center;gap:6px'}, [
-        el('span', {style: 'color:#9094a1'}, 'Measured:'),
-        el('span', {
-          style: 'width:100px;font-family:monospace;color:#a8f0a8;font-weight:600'
-        }, pt.measured !== null ? pt.measured.toFixed(4) : '---')
-      ]);
-      
-      const measureBtn = el('button', {
-        className: 'btn',
-        disabled: pt.averaging,
-onclick: async () => {
-          const ch = parseInt(channelSelect.value);
-          const avgPeriod = parseFloat(avgInput.value) || 2.0;
-          
-          measureBtn.disabled = true;
-          measureBtn.textContent = 'Measuring...';
-          pt.averaging = true;
-          
-          try {
-            // CRITICAL: Temporarily set slope=1, offset=0 to get raw voltages
-            console.log('[CALIBRATE] Fetching current config...');
-            const cfg = await (await fetch('/api/config')).json();
-            
-            // Find the channel and save original values
-            let originalSlope, originalOffset;
-            let channel_idx = ch;
-            let targetBoard = null;
-            
-            if (cfg.boards1608) {
-              for (let board of cfg.boards1608) {
-                if (!board.enabled) continue;
-                if (channel_idx < board.analogs.length) {
-                  originalSlope = board.analogs[channel_idx].slope;
-                  originalOffset = board.analogs[channel_idx].offset;
-                  board.analogs[channel_idx].slope = 1.0;
-                  board.analogs[channel_idx].offset = 0.0;
-                  targetBoard = board;
-                  console.log('[CALIBRATE] Saved original: slope =', originalSlope, ', offset =', originalOffset);
-                  break;
-                } else {
-                  channel_idx -= board.analogs.length;
-                }
-              }
-            }
-            
-            if (!targetBoard) {
-              throw new Error('Channel not found in config');
-            }
-            
-            // Apply temporary config
-            console.log('[CALIBRATE] Setting slope=1, offset=0 temporarily...');
-            await fetch('/api/config', {
-              method: 'PUT',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(cfg)
-            });
-            
-            // Wait for config to propagate
-            await new Promise(resolve => setTimeout(resolve, 200));
-            
-            // Collect samples with slope=1, offset=0
-            console.log('[CALIBRATE] Measuring raw voltage...');
-            const samples = [];
-            const sampleRate = 20; // Hz
-            const numSamples = Math.floor(avgPeriod * sampleRate);
-            
-            for (let i = 0; i < numSamples; i++) {
-              if (state && state.ai && ch < state.ai.length) {
-                samples.push(state.ai[ch]);
-              }
-              await new Promise(resolve => setTimeout(resolve, 1000 / sampleRate));
-            }
-            
-            // Restore original slope/offset
-            console.log('[CALIBRATE] Restoring original slope/offset...');
-            channel_idx = ch;
-            for (let board of cfg.boards1608) {
-              if (!board.enabled) continue;
-              if (channel_idx < board.analogs.length) {
-                board.analogs[channel_idx].slope = originalSlope;
-                board.analogs[channel_idx].offset = originalOffset;
-                break;
-              } else {
-                channel_idx -= board.analogs.length;
-              }
-            }
-            
-            await fetch('/api/config', {
-              method: 'PUT',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify(cfg)
-            });
-            
-            // Calculate average
-            if (samples.length > 0) {
-              pt.measured = samples.reduce((a, b) => a + b, 0) / samples.length;
-              console.log('[CALIBRATE] Measured raw voltage:', pt.measured, 'V');
-              updatePointsUI();
-            } else {
-              throw new Error('No samples collected');
-            }
-            
-          } catch(e) {
-            console.error('[CALIBRATE] Measurement error:', e);
-            alert('Measurement failed: ' + e.message);
-          } finally {
-            pt.averaging = false;
-            measureBtn.disabled = false;
-            measureBtn.textContent = 'Measure';
-            updatePointsUI();
-          }
-        }
-      }, pt.averaging ? 'Measuring...' : 'Measure');
-      
-      row.append(pointLabel, refLabel, measuredLabel, measureBtn);
-      pointsDiv.append(row);
-    });
-  }
-  
-  updatePointsUI();
-  
-  // Calculate button
-  const calculateBtn = el('button', {
-    className: 'btn primary',
-    style: 'margin-top:16px',
-    onclick: async () => {
-      // Check that we have both measurements
-      if (points[0].measured === null || points[1].measured === null) {
-        alert('Please measure both calibration points first.');
-        return;
-      }
-      
-      const ref1 = points[0].reference;
-      const meas1 = points[0].measured;
-      const ref2 = points[1].reference;
-      const meas2 = points[1].measured;
-      
-      // Check for divide by zero
-      if (Math.abs(meas2 - meas1) < 1e-9) {
-        alert('Measured values are too similar. Please use two different reference values.');
-        return;
-      }
-      
-      // Calculate slope and offset
-      // We want: output = slope * measured + offset
-      // Where: ref1 = slope * meas1 + offset
-      //        ref2 = slope * meas2 + offset
-      // Solving: slope = (ref2 - ref1) / (meas2 - meas1)
-      //          offset = ref1 - slope * meas1
-      
-      console.log('[CALIBRATE] Point 1:');
-      console.log('  Reference value:', ref1);
-      console.log('  Measured voltage:', meas1);
-      console.log('[CALIBRATE] Point 2:');
-      console.log('  Reference value:', ref2);
-      console.log('  Measured voltage:', meas2);
-      
-      const slope = (ref2 - ref1) / (meas2 - meas1);
-      const offset = ref1 - slope * meas1;
-      
-      console.log('[CALIBRATE] Calculations:');
-      console.log('  Delta reference:', ref2 - ref1);
-      console.log('  Delta measured:', meas2 - meas1);
-      console.log('  Slope:', slope);
-      console.log('  Offset:', offset);
-      console.log('[CALIBRATE] Verification:');
-      console.log('  Point 1 check: slope * meas1 + offset =', slope * meas1 + offset, '(should be', ref1, ')');
-      console.log('  Point 2 check: slope * meas2 + offset =', slope * meas2 + offset, '(should be', ref2, ')');
-      
-      const ch = parseInt(channelSelect.value);
-      
-      // Show confirmation
-      const confirmMsg = `Calibration Results:
-
-` +
-        `Point 1: ${meas1.toFixed(4)} V → ${ref1} (reference)
-` +
-        `Point 2: ${meas2.toFixed(4)} V → ${ref2} (reference)
-
-` +
-        `Calculated:
-` +
-        `  Slope: ${slope.toFixed(6)}
-` +
-        `  Offset: ${offset.toFixed(6)}
-
-` +
-        `Apply this calibration to AI${ch}?`;
-      
-      if (!confirm(confirmMsg)) return;
-      
-      // Update config via API
-      try {
-        // Fetch current config
-        const cfg = await (await fetch('/api/config')).json();
-        
-        // Find the right board and channel
-        let updated = false;
-        let channel_idx = ch;
-        
-        if (cfg.boards1608) {
-          for (let board of cfg.boards1608) {
-            if (!board.enabled) continue;
-            if (channel_idx < board.analogs.length) {
-              board.analogs[channel_idx].slope = slope;
-              board.analogs[channel_idx].offset = offset;
-              updated = true;
-              break;
-            } else {
-              channel_idx -= board.analogs.length;
-            }
-          }
-        }
-        
-        if (!updated) {
-          alert('Failed to find channel in config');
-          return;
-        }
-        
-        // Save config
-        const saveResp = await fetch('/api/config', {
-          method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(cfg)
-        });
-        
-        if (saveResp.ok) {
-          alert('Calibration applied successfully!');
-          closeModal();
-        } else {
-          alert('Failed to save config');
-        }
-        
-      } catch(e) {
-        alert('Calibration failed: ' + e.message);
-      }
-    }
-  }, 'Calculate & Apply Calibration');
-  
-  const cancelBtn = el('button', {
-    className: 'btn',
-    onclick: closeModal
-  }, 'Cancel');
-  
-  root.append(
-    title,
-    subtitle,
-    el('div', {style: 'margin:12px 0'}, [
-      el('label', {}, ['Select Channel: ', channelSelect])
-    ]),
-    el('div', {style: 'margin:12px 0'}, [
-      el('label', {}, ['Averaging Period (sec): ', avgInput])
-    ]),
-    el('div', {style: 'color:#7a7f8f;font-size:11px;margin:8px 0'}, 
-      'Instructions: Set sensor to first known value, enter reference value, click Measure. ' +
-      'Repeat for second known value. Then click Calculate to apply calibration.'),
-    pointsDiv,
-    el('div', {style: 'display:flex;gap:8px;margin-top:16px'}, [calculateBtn, cancelBtn])
-  );
-  
-  showModal(root);
-}
-
-
 async function openZeroAIDialog() {
   const cfg = await (await fetch('/api/config')).json();
   const analogs = getAllAnalogs(cfg);
@@ -6584,7 +6073,8 @@ async function openZeroAIDialog() {
   showModal(root);
 }
 
-async function openMathEditor() {
+async function openScriptEditor() {
+  async function openMathEditor() {
     const math_data = await (await fetch('/api/math_operators')).json();
     const operators = math_data.operators || [];
 
@@ -6822,29 +6312,13 @@ async function openMathEditor() {
         inp.click();
       }
     }, '📁 Load from File');
-    
-    // Save As button - download script as JSON file
-    const saveAsBtn = el('button', {
-      className: 'btn',
-      onclick: () => {
-        const scriptData = {events: events};
-        const blob = new Blob([JSON.stringify(scriptData, null, 2)], {type: 'application/json'});
-        const url = URL.createObjectURL(blob);
-        const a = el('a', {
-          href: url,
-          download: `script_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`
-        });
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    }, '💾 Save As...');
 
     const table = el('table', {className: 'form script-table'});
     const thead = el('thead', {}, el('tr', {}, [
       el('th', {}, 'Time (s)'),
       el('th', {}, 'Duration (s)'),
       el('th', {}, 'Type'),
-      el('th', {}, 'Channel/Name'),
+      el('th', {}, 'Channel'),
       el('th', {}, 'Value/State'),
       el('th', {}, 'NO/NC'),
       el('th', {}, 'Actions')
@@ -6872,11 +6346,9 @@ async function openMathEditor() {
         });
         durationInput.oninput = () => evt.duration = parseFloat(durationInput.value) || 0;
 
-        const typeSelect = el('select', {style: 'width:100px'}, [
+        const typeSelect = el('select', {style: 'width:80px'}, [
           el('option', {value: 'DO'}, 'DO'),
-          el('option', {value: 'AO'}, 'AO'),
-          el('option', {value: 'buttonVar'}, 'ButtonVar'),
-          el('option', {value: 'var'}, 'Var')
+          el('option', {value: 'AO'}, 'AO')
         ]);
         typeSelect.value = evt.type || 'DO';
         typeSelect.onchange = () => {
@@ -6884,69 +6356,20 @@ async function openMathEditor() {
           renderEvents();
         };
 
-        // Create channel selector based on type
-        let channelControl;
-        
-        if (evt.type === 'DO' || !evt.type) {
-          // DO: dropdown with names
-          const doSelect = el('select', {style: 'width:120px'});
-          const allDOs = getAllDigitalOutputs(configCache);
-          allDOs.forEach((doChannel, idx) => {
-            doSelect.append(el('option', {value: idx}, `DO${idx}: ${doChannel.name || 'Unnamed'}`));
-          });
-          doSelect.value = evt.channel || 0;
-          doSelect.onchange = () => evt.channel = parseInt(doSelect.value);
-          channelControl = doSelect;
-          
-        } else if (evt.type === 'AO') {
-          // AO: dropdown with names
-          const aoSelect = el('select', {style: 'width:120px'});
-          const allAOs = getAllAnalogOutputs(configCache);
-          allAOs.forEach((aoChannel, idx) => {
-            aoSelect.append(el('option', {value: idx}, `AO${idx}: ${aoChannel.name || 'Unnamed'}`));
-          });
-          aoSelect.value = evt.channel || 0;
-          aoSelect.onchange = () => evt.channel = parseInt(aoSelect.value);
-          channelControl = aoSelect;
-          
-        } else {
-          // Fallback for unknown types
-          const channelInput = el('input', {
-            type: 'number',
-            value: evt.channel || 0,
-            min: 0,
-            step: 1,
-            style: 'width:60px'
-          });
-          channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
-          channelControl = channelInput;
-        }
+        const channelInput = el('input', {
+          type: 'number',
+          value: evt.channel || 0,
+          min: 0,
+          max: (evt.type === 'AO' ? 1 : 7),
+          step: 1,
+          style: 'width:60px'
+        });
+        channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
 
         let valueControl;
         let noNcControl = el('span', {}, '—');
 
-        if (evt.type === 'buttonVar' || evt.type === 'var') {
-          // For buttonVar/var: show varName input and numeric value
-          const varNameInput = el('input', {
-            type: 'text',
-            value: evt.varName || (evt.type === 'buttonVar' ? 'button1' : 'var1'),
-            placeholder: 'name',
-            style: 'width:80px'
-          });
-          varNameInput.oninput = () => evt.varName = varNameInput.value;
-          channelControl = varNameInput;
-          
-          const valueInput = el('input', {
-            type: 'number',
-            value: evt.value || 0,
-            step: 'any',
-            style: 'width:80px'
-          });
-          valueInput.oninput = () => evt.value = parseFloat(valueInput.value) || 0;
-          valueControl = valueInput;
-          noNcControl = el('span', {}, '—');
-          
-        } else if (evt.type === 'DO' || !evt.type) {
+        if (evt.type === 'DO' || !evt.type) {
           const stateCheck = el('input', {
             type: 'checkbox',
             checked: !!evt.state
@@ -7029,7 +6452,7 @@ async function openMathEditor() {
           el('td', {}, timeInput),
           el('td', {}, durationInput),
           el('td', {}, typeSelect),
-          el('td', {}, channelControl),
+          el('td', {}, channelInput),
           el('td', {}, valueControl),
           el('td', {}, noNcControl),
           el('td', {style: 'display:flex;gap:4px'}, [upBtn, downBtn, deleteBtn])
@@ -7045,15 +6468,8 @@ async function openMathEditor() {
     const addBtn = el('button', {
       className: 'btn',
       onclick: () => {
-        // Auto-populate time = last event's time + duration
-        let newTime = 0;
-        if (events.length > 0) {
-          const lastEvt = events[events.length - 1];
-          newTime = (lastEvt.time || 0) + (lastEvt.duration || 0);
-        }
-        
         events.push({
-          time: newTime,
+          time: 0,
           duration: 0,
           type: 'DO',
           channel: 0,
@@ -7093,7 +6509,7 @@ async function openMathEditor() {
 
     root.append(
         title,
-        el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn, saveAsBtn]),
+        el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn]),
         el('div', {style: 'margin:12px 0'}, [
           el('p', {}, 'Define timed events for automated control. Time is in seconds from script start.'),
           el('p', {style: 'font-size:12px;color:var(--muted)'},
@@ -7105,6 +6521,8 @@ async function openMathEditor() {
 
     showModal(root);
   }
+
+}
 
 /* ======================== EXPRESSION HELP ======================== */
 function openExpressionHelp() {

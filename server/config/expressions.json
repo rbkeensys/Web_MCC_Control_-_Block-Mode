@@ -75,8 +75,8 @@
     {
       "name": "Spark",
       "enabled": true,
-      "expression": "static.sparkCount\nbutton = buttonVars.sparkON\nIF static.sparkCount >= 1 THEN\n    static.sparkCount = 0\n    IF button==1 THEN\n       \"DO:Spark\" = 1\n    ELSE\n       \"DO:Spark\" = 0\n    ENDIF\nELSE\n    static.sparkCount = static.sparkCount + 1\n    \"DO:Spark\" = 0\nENDIF\n\ncount = static.sparkCount\nspark = \"DO:Spark\"",
-      "execution_rate_hz": null
+      "expression": "static.sparkCount\nstatic.prevSpark\n\nbutton = buttonVars.sparkON\nIF button == 1 THEN\n    IF static.sparkCount >= 1 THEN\n        static.sparkCount = 0\n        \"DO:Spark\" = 1\n        static.prevSpark = 1\n    ELSE\n        static.sparkCount = 1\n        \"DO:Spark\" = 0\n        static.prevSpark = 0\n    ENDIF\nELSE\n    if prevSpark == 1 then\n        \"DO:Spark\" = 0\n        static.prevSpark = 0\n    endif\nENDIF\n      \n\n",
+      "execution_rate_hz": 50
     }
   ]
 }
