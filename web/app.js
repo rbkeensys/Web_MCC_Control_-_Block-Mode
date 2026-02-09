@@ -1,4 +1,4 @@
-const UI_VERSION = "1.4.3";  // Fixed createSignalSelector  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
+const UI_VERSION = "1.6.2";  // FIXED batch display - now feeds ALL samples to charts, not just last one!
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -590,6 +590,37 @@ async function executeScriptEvent(evt){
       }
 
       console.log(`[Script] ✓ AO${channel} set to ${volts}V`);
+      
+    } else if (evt.type === 'buttonVar') {
+      const varName = evt.varName || 'button1';
+      const value = evt.value || 0;
+      
+      console.log(`[Script] buttonVar.${varName}: ${value}`);
+      
+      // Update local state
+      if (!state.buttonVars) state.buttonVars = {};
+      state.buttonVars[varName] = value;
+      
+      // Sync to backend for expressions
+      const response = await fetch('/api/button_vars', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({vars: state.buttonVars})
+      });
+      
+      if (!response.ok) {
+        console.error('[Script] buttonVar set failed:', await response.text());
+        return;
+      }
+      
+      console.log(`[Script] ✓ buttonVar.${varName} set to ${value}`);
+      
+    } else if (evt.type === 'var') {
+      const varName = evt.varName || 'var1';
+      const value = evt.value || 0;
+      
+      console.log(`[Script] var.${varName}: ${value} (not implemented - expressions only)`);
+      // Note: Generic 'var' type for future use, not currently used by expressions
     }
   } catch(e) {
     console.error('[Script] Event execution failed:', e, 'Event:', evt);
@@ -856,6 +887,19 @@ document.addEventListener('DOMContentLoaded', () => {
 function wireUI(){
   $('#connectBtn')?.addEventListener('click', connect);
   $('#setRate')?.addEventListener('click', setRate);
+  $('#setDisplayRate')?.addEventListener('click', async ()=>{
+    const hz = parseFloat($('#displayRate').value) || 25;
+    try {
+      await fetch('/api/display/rate', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({hz})
+      });
+      console.log(`Display rate set to ${hz} Hz`);
+    } catch(e) {
+      console.error('Failed to set display rate:', e);
+    }
+  });
   $('#fullscreenBtn')?.addEventListener('click', toggleFullscreen);
   $('#exitFullscreenBtn')?.addEventListener('click', toggleFullscreen);
   $('#editConfig')?.addEventListener('click', ()=>openConfigForm());
@@ -985,8 +1029,8 @@ function connect(){
     if(msg.type==='session'){ sessionDir=msg.dir; $('#session').textContent=sessionDir; }
     if (msg.type === 'tick') feedTick(msg);
     if (msg.type === 'batch' && msg.samples && msg.samples.length > 0) {
-      // Feed the last sample from the batch (most recent data)
-      feedTick(msg.samples[msg.samples.length - 1]);
+      // Feed ALL samples from batch to charts (for proper display at low update rates)
+      msg.samples.forEach(sample => feedTick(sample));
     }
   };
   updateConnectBtn();
@@ -6073,214 +6117,6 @@ async function openZeroAIDialog() {
   showModal(root);
 }
 
-async function openScriptEditor() {
-  async function openMathEditor() {
-    const math_data = await (await fetch('/api/math_operators')).json();
-    const operators = math_data.operators || [];
-
-    const root = el('div', {});
-    const title = el('h2', {}, 'Math Operators Editor');
-
-    const loadBtn = el('button', {
-      className: 'btn',
-      onclick: () => {
-        const inp = el('input', {type: 'file', accept: '.json'});
-        inp.onchange = async () => {
-          const f = inp.files?.[0];
-          if (!f) return;
-          try {
-            const text = await f.text();
-            const loaded = JSON.parse(text);
-            Object.assign(math_data, loaded);
-            alert('Math config loaded! Close and reopen to see changes, or click Save to apply.');
-          } catch (e) {
-            alert('Failed to load Math config: ' + e.message);
-          }
-        };
-        inp.click();
-      }
-    }, '📁 Load from File');
-
-    const addUnaryBtn = el('button', {
-      className: 'btn',
-      onclick: () => {
-        operators.push({
-          enabled: true,
-          name: `Math${operators.length}`,
-          operation: 'sqr',
-          input_a: {kind: 'ai', index: 0}
-        });
-        renderMathEditor();
-      }
-    }, '+ Add Unary (sqr, sqrt, etc)');
-
-    const addBinaryBtn = el('button', {
-      className: 'btn',
-      onclick: () => {
-        operators.push({
-          enabled: true,
-          name: `Math${operators.length}`,
-          operation: 'add',
-          input_a: {kind: 'ai', index: 0},
-          input_b: {kind: 'ai', index: 1}
-        });
-        renderMathEditor();
-      }
-    }, '+ Add Binary (+, -, ×, ÷)');
-
-    const container = el('div', {style: 'overflow:auto;max-height:60vh'});
-
-    function renderMathEditor() {
-      container.innerHTML = '';
-
-      operators.forEach((op, idx) => {
-        const card = el('fieldset', {style: 'margin-bottom:20px; padding:12px;'});
-        const legend = el('legend', {}, `Math${idx}: ${op.name}`);
-        card.append(legend);
-
-        const topRow = el('div', {className: 'row', style: 'margin-bottom:12px'});
-        topRow.append(
-            el('label', {}, [
-              el('input', {type: 'checkbox', checked: op.enabled, onchange: e => op.enabled = e.target.checked}),
-              ' Enabled'
-            ]),
-            el('label', {style: 'flex:2'}, [
-              'Name: ',
-              el('input', {type: 'text', value: op.name, oninput: e => op.name = e.target.value, style: 'width:100%'})
-            ]),
-            el('button', {
-              className: 'btn danger',
-              onclick: () => {
-                if (confirm(`Delete Math${idx}?`)) {
-                  operators.splice(idx, 1);
-                  renderMathEditor();
-                }
-              }
-            }, '🗑 Delete')
-        );
-        card.append(topRow);
-
-        // Operation select
-        const opRow = el('div', {style: 'margin:12px 0'});
-        const opSelect = el('select', {
-          onchange: e => {
-            op.operation = e.target.value;
-            // Binary ops need input_b, unary don't
-            const binary = ['add', 'sub', 'mul', 'div', 'mod', 'pow', 'min', 'max', 'atan2'];
-            if (binary.includes(e.target.value)) {
-              if (!op.input_b) op.input_b = {kind: 'ai', index: 1};
-            } else {
-              delete op.input_b;
-            }
-            renderMathEditor();
-          },
-          style: 'font-size:14px; padding:6px 12px'
-        });
-
-        const opGroups = {
-          'Unary': ['sqr', 'sqrt', 'log10', 'ln', 'exp', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'abs', 'neg'],
-          'Binary': ['add', 'sub', 'mul', 'div', 'mod', 'pow', 'min', 'max', 'atan2']
-        };
-        Object.entries(opGroups).forEach(([group, ops]) => {
-          const optgroup = el('optgroup', {label: group});
-          ops.forEach(o => optgroup.append(el('option', {value: o}, o)));
-          opSelect.append(optgroup);
-        });
-        opSelect.value = op.operation || 'add';
-        opRow.append(el('label', {}, ['Operation: ', opSelect]));
-        card.append(opRow);
-
-        // Input A
-        const inputASection = el('div', {style: 'border:1px solid #2a3046; padding:8px; margin-bottom:8px; border-radius:6px'});
-        inputASection.append(el('h4', {style: 'margin:0 0 8px 0; color:#a8b3cf'}, 'Input A'));
-        inputASection.append(createMathInputEditor(op.input_a));
-        card.append(inputASection);
-
-        // Input B (only for binary ops)
-        const binary = ['add', 'sub', 'mul', 'div', 'mod', 'pow', 'min', 'max', 'atan2'];
-        if (binary.includes(op.operation)) {
-          const inputBSection = el('div', {style: 'border:1px solid #2a3046; padding:8px; border-radius:6px'});
-          inputBSection.append(el('h4', {style: 'margin:0 0 8px 0; color:#a8b3cf'}, 'Input B'));
-          inputBSection.append(createMathInputEditor(op.input_b));
-          card.append(inputBSection);
-        }
-
-        container.append(card);
-      });
-    }
-
-    function createMathInputEditor(input) {
-      const div = el('div', {className: 'row'});
-
-      const kindSelect = el('select', {
-        onchange: e => input.kind = e.target.value,
-        style: 'flex:1'
-      });
-      ['ai', 'ao', 'tc', 'pid_u', 'math'].forEach(k => {
-        kindSelect.append(el('option', {value: k}, k.toUpperCase()));
-      });
-      kindSelect.value = input.kind || 'ai';
-
-      const indexInput = el('input', {
-        type: 'number',
-        min: 0,
-        step: 1,
-        value: input.index || 0,
-        oninput: e => input.index = parseInt(e.target.value) || 0,
-        style: 'flex:1'
-      });
-
-      div.append(
-          el('label', {style: 'flex:1'}, ['Kind: ', kindSelect]),
-          el('label', {style: 'flex:1'}, ['Index: ', indexInput])
-      );
-
-      return div;
-    }
-
-    renderMathEditor();
-
-    const saveBtn = el('button', {
-      className: 'btn',
-      onclick: async () => {
-        try {
-          const resp = await fetch('/api/math_operators', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(math_data)
-          });
-          const result = await resp.json();
-          if (result.ok) {
-            alert('Math operators saved!');
-            closeModal();
-          } else {
-            alert('Failed to save: ' + result.error);
-          }
-        } catch (e) {
-          alert('Network error: ' + e.message);
-        }
-      }
-    }, '💾 Save');
-
-    const downloadBtn = el('button', {
-      className: 'btn',
-      onclick: () => {
-        const blob = new Blob([JSON.stringify(math_data, null, 2)], {type: 'application/json'});
-        const a = el('a', {href: URL.createObjectURL(blob), download: 'math_operators.json'});
-        a.click();
-      }
-    }, '⬇ Download JSON');
-
-    root.append(
-        title,
-        el('div', {className: 'row', style: 'gap:8px;margin:12px 0'}, [loadBtn, addUnaryBtn, addBinaryBtn]),
-        container,
-        el('div', {className: 'row', style: 'gap:8px;margin-top:20px'}, [saveBtn, downloadBtn])
-    );
-
-    showModal(root);
-  }
-
   async function openScriptEditor() {
     const script = await (await fetch('/api/script')).json();
     const events = script.events || [];
@@ -6312,13 +6148,29 @@ async function openScriptEditor() {
         inp.click();
       }
     }, '📁 Load from File');
+    
+    // Save As button - download script as JSON file
+    const saveAsBtn = el('button', {
+      className: 'btn',
+      onclick: () => {
+        const scriptData = {events: events};
+        const blob = new Blob([JSON.stringify(scriptData, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = el('a', {
+          href: url,
+          download: `script_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`
+        });
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    }, '💾 Save As...');
 
     const table = el('table', {className: 'form script-table'});
     const thead = el('thead', {}, el('tr', {}, [
       el('th', {}, 'Time (s)'),
       el('th', {}, 'Duration (s)'),
       el('th', {}, 'Type'),
-      el('th', {}, 'Channel'),
+      el('th', {}, 'Channel/Name'),
       el('th', {}, 'Value/State'),
       el('th', {}, 'NO/NC'),
       el('th', {}, 'Actions')
@@ -6346,9 +6198,11 @@ async function openScriptEditor() {
         });
         durationInput.oninput = () => evt.duration = parseFloat(durationInput.value) || 0;
 
-        const typeSelect = el('select', {style: 'width:80px'}, [
+        const typeSelect = el('select', {style: 'width:100px'}, [
           el('option', {value: 'DO'}, 'DO'),
-          el('option', {value: 'AO'}, 'AO')
+          el('option', {value: 'AO'}, 'AO'),
+          el('option', {value: 'buttonVar'}, 'ButtonVar'),
+          el('option', {value: 'var'}, 'Var')
         ]);
         typeSelect.value = evt.type || 'DO';
         typeSelect.onchange = () => {
@@ -6356,20 +6210,69 @@ async function openScriptEditor() {
           renderEvents();
         };
 
-        const channelInput = el('input', {
-          type: 'number',
-          value: evt.channel || 0,
-          min: 0,
-          max: (evt.type === 'AO' ? 1 : 7),
-          step: 1,
-          style: 'width:60px'
-        });
-        channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
+        // Create channel selector based on type
+        let channelControl;
+        
+        if (evt.type === 'DO' || !evt.type) {
+          // DO: dropdown with names
+          const doSelect = el('select', {style: 'width:120px'});
+          const allDOs = getAllDigitalOutputs(configCache);
+          allDOs.forEach((doChannel, idx) => {
+            doSelect.append(el('option', {value: idx}, `DO${idx}: ${doChannel.name || 'Unnamed'}`));
+          });
+          doSelect.value = evt.channel || 0;
+          doSelect.onchange = () => evt.channel = parseInt(doSelect.value);
+          channelControl = doSelect;
+          
+        } else if (evt.type === 'AO') {
+          // AO: dropdown with names
+          const aoSelect = el('select', {style: 'width:120px'});
+          const allAOs = getAllAnalogOutputs(configCache);
+          allAOs.forEach((aoChannel, idx) => {
+            aoSelect.append(el('option', {value: idx}, `AO${idx}: ${aoChannel.name || 'Unnamed'}`));
+          });
+          aoSelect.value = evt.channel || 0;
+          aoSelect.onchange = () => evt.channel = parseInt(aoSelect.value);
+          channelControl = aoSelect;
+          
+        } else {
+          // Fallback for unknown types
+          const channelInput = el('input', {
+            type: 'number',
+            value: evt.channel || 0,
+            min: 0,
+            step: 1,
+            style: 'width:60px'
+          });
+          channelInput.oninput = () => evt.channel = parseInt(channelInput.value) || 0;
+          channelControl = channelInput;
+        }
 
         let valueControl;
         let noNcControl = el('span', {}, '—');
 
-        if (evt.type === 'DO' || !evt.type) {
+        if (evt.type === 'buttonVar' || evt.type === 'var') {
+          // For buttonVar/var: show varName input and numeric value
+          const varNameInput = el('input', {
+            type: 'text',
+            value: evt.varName || (evt.type === 'buttonVar' ? 'button1' : 'var1'),
+            placeholder: 'name',
+            style: 'width:80px'
+          });
+          varNameInput.oninput = () => evt.varName = varNameInput.value;
+          channelControl = varNameInput;
+          
+          const valueInput = el('input', {
+            type: 'number',
+            value: evt.value || 0,
+            step: 'any',
+            style: 'width:80px'
+          });
+          valueInput.oninput = () => evt.value = parseFloat(valueInput.value) || 0;
+          valueControl = valueInput;
+          noNcControl = el('span', {}, '—');
+          
+        } else if (evt.type === 'DO' || !evt.type) {
           const stateCheck = el('input', {
             type: 'checkbox',
             checked: !!evt.state
@@ -6452,7 +6355,7 @@ async function openScriptEditor() {
           el('td', {}, timeInput),
           el('td', {}, durationInput),
           el('td', {}, typeSelect),
-          el('td', {}, channelInput),
+          el('td', {}, channelControl),
           el('td', {}, valueControl),
           el('td', {}, noNcControl),
           el('td', {style: 'display:flex;gap:4px'}, [upBtn, downBtn, deleteBtn])
@@ -6468,8 +6371,15 @@ async function openScriptEditor() {
     const addBtn = el('button', {
       className: 'btn',
       onclick: () => {
+        // Auto-populate time = last event's time + duration
+        let newTime = 0;
+        if (events.length > 0) {
+          const lastEvt = events[events.length - 1];
+          newTime = (lastEvt.time || 0) + (lastEvt.duration || 0);
+        }
+        
         events.push({
-          time: 0,
+          time: newTime,
           duration: 0,
           type: 'DO',
           channel: 0,
@@ -6509,7 +6419,7 @@ async function openScriptEditor() {
 
     root.append(
         title,
-        el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn]),
+        el('div', {style: 'display:flex;gap:8px;margin:12px 0'}, [loadBtn, saveAsBtn]),
         el('div', {style: 'margin:12px 0'}, [
           el('p', {}, 'Define timed events for automated control. Time is in seconds from script start.'),
           el('p', {style: 'font-size:12px;color:var(--muted)'},
@@ -6521,8 +6431,6 @@ async function openScriptEditor() {
 
     showModal(root);
   }
-
-}
 
 /* ======================== EXPRESSION HELP ======================== */
 function openExpressionHelp() {
@@ -6727,7 +6635,7 @@ function openExpressionDebug(widget) {
             if (trimmed.startsWith('IF ')) {
               // Check if THEN is on the same line
               const hasThen = trimmed.includes(' THEN');
-              if (lineIdx < 25) console.log(`[BlockStack] Line ${lineIdx}: IF detected, hasThen=${hasThen}, trimmed="${trimmed.substring(0, 80)}"`);
+              // DEBUG DISABLED: //              if (lineIdx < 25) console.log(`[BlockStack] Line ${lineIdx}: IF detected, hasThen=${hasThen}, trimmed="${trimmed.substring(0, 80)}"`);
               if (hasThen) {
                 // Inline IF...THEN - push THEN directly
                 blockStack.push({type: 'then', line: lineIdx});
@@ -6792,7 +6700,7 @@ function openExpressionDebug(widget) {
             
             // Debug logging for assignment lines
             if (line.match(/^\s*\w+\s*=/) || line.match(/^\s*static\.\w+\s*=/)) {
-              console.log(`[ExprDebug] Line ${lineIdx}: "${line.trim()}" - executed=${lineExecuted}, isInBranch=${isInBranch}, currentBlock=${currentBlock}, blockStack=[${blockStack.map(b => b.type).join(',')}]`);
+              // DEBUG DISABLED: //              console.log(`[ExprDebug] Line ${lineIdx}: "${line.trim()}" - executed=${lineExecuted}, isInBranch=${isInBranch}, currentBlock=${currentBlock}, blockStack=[${blockStack.map(b => b.type).join(',')}]`);
             }
             
             // Color the line if it executed and is in a branch
@@ -6913,7 +6821,7 @@ function openExpressionDebug(widget) {
       });
     })
     .catch(err => {
-      console.error('[ExprDebug] Error:', err);
+      // DEBUG DISABLED: //      console.error('[ExprDebug] Error:', err);
       alert('Failed to load expression: ' + err.message);
     });
 }
@@ -7255,6 +7163,23 @@ async function openExpressionEditor() {
     }
   }, '💾 Save');
   
+  const reloadBtn = el('button', {
+    className: 'btn',
+    onclick: async () => {
+      try {
+        const resp = await fetch('/api/expressions/reload', {method: 'POST'});
+        const result = await resp.json();
+        if (result.ok) {
+          alert(`✅ Reloaded ${result.count} expressions! No server restart needed.`);
+        } else {
+          alert('Failed to reload: ' + result.error);
+        }
+      } catch (e) {
+        alert('Failed to reload: ' + e.message);
+      }
+    }
+  }, '🔄 Hot Reload');
+  
   const saveAsBtn = el('button', {
     className: 'btn',
     onclick: () => {
@@ -7275,7 +7200,7 @@ async function openExpressionEditor() {
     }
   }, '💾 Save As...');
   
-  saveButtons.append(saveBtn, saveAsBtn);
+  saveButtons.append(saveBtn, reloadBtn, saveAsBtn);
   
   root.append(title, topButtons, container, globalsSection, saveButtons);
   showModal(root);

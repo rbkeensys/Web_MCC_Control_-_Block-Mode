@@ -13,7 +13,7 @@ NEW STRUCTURE:
 This allows multiple E-1608 and E-TC boards, each with their own channels.
 """
 
-__version__ = "2.0.1"  # Fixed missing PID fields
+__version__ = "2.1.0"  # Added blocking field to DigitalOutCfg
 
 from pydantic import BaseModel
 from typing import List, Optional
@@ -36,6 +36,7 @@ class DigitalOutCfg(BaseModel):
     include: bool = True
     logicElement: Optional[int] = None  # Index of LE that gates this DO (None = no gating)
     mode: str = "toggle"  # 'toggle', 'momentary', 'buzz'
+    blocking: bool = False  # If True, pauses AI acquisition during DO writes for <5ms response
 
 class AnalogOutCfg(BaseModel):
     name: str = "AO"
@@ -312,7 +313,7 @@ def default_config():
                 "aiMode": "SE",
                 "enabled": True,
                 "analogs": [{"name": f"AI{i}", "slope": 1.0, "offset": 0.0, "cutoffHz": 0.0, "units": "", "include": True} for i in range(8)],
-                "digitalOutputs": [{"name": f"DO{i}", "normallyOpen": True, "momentary": False, "actuationTime": 0.0, "include": True, "logicElement": None, "mode": "toggle"} for i in range(8)],
+                "digitalOutputs": [{"name": f"DO{i}", "normallyOpen": True, "momentary": False, "actuationTime": 0.0, "include": True, "logicElement": None, "mode": "toggle", "blocking": False} for i in range(8)],
                 "analogOutputs": [{"name": f"AO{i}", "minV": 0, "maxV": 10, "startupV": 0, "include": True, "enable_gate": False, "enable_kind": "do", "enable_index": 0} for i in range(2)]
             }
         ],
