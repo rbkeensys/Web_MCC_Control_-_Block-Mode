@@ -1,6 +1,10 @@
-
-__version__ = "5.19.0"  # FIXED burst block size to use TARGET_UI_HZ instead of hardcoded 25!
+"""
+Version: 1.0.0
+Updated: 2026-01-14 23:30:56
+"""
+__version__ = "5.19.2"  # Added cycle-start debug to show samples grabbed vs buffer size
 __updated__ = "2026-01-14 23:30:56"
+
 
 # server/server.py
 # Python 3.10+
@@ -813,6 +817,10 @@ async def acq_loop():
                 if ticks % 100 == 0:
                     print(f"[BUFFER] Empty! Skipping cycle...")
                 continue
+            
+            # Debug at low rates
+            if TARGET_UI_HZ <= 5.0:
+                print(f"[CYCLE-START] Will grab {samples_to_grab} samples from buffer of {available_samples}")
 
             # Initialize expr telemetry - will be populated after sample loop
             batch_expr_tel = []
@@ -1206,11 +1214,12 @@ async def acq_loop():
                 }
                 asyncio.create_task(broadcast(batch_msg))  # Fire and forget!
                 
-                if ticks % 100 == 0:
+                # Always print at low display rates for visibility
+                if TARGET_UI_HZ <= 5.0 or ticks % 100 == 0:
                     with buffer_lock:
                         buf_size = len(sample_buffer)
                     cycle_time = (time.perf_counter() - display_start) * 1000
-                    print(f"[TIMER] Processed {len(frames_this_cycle)} samples in {cycle_time:.1f}ms | Buffer: {buf_size}")
+                    print(f"[TIMER@{TARGET_UI_HZ}Hz] Processed {len(frames_this_cycle)} samples in {cycle_time:.1f}ms | Buffer: {buf_size}")
 
             # Debug for first few ticks (moved inside sample loop above)
             if ticks <= MCC_DUMP_FIRST:

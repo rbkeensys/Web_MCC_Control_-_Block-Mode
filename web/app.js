@@ -1,4 +1,4 @@
-const UI_VERSION = "1.6.2";  // FIXED batch display - now feeds ALL samples to charts, not just last one!
+const UI_VERSION = "1.7.2";  // FIXED batch timestamps! Now spreads samples over proper time span (1s for 200 samples @ 200Hz)
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -16,7 +16,6 @@ function safeArc(ctx, cx, cy, r, a0, a1) {
   ctx.arc(cx, cy, r, a0, a1);
   return true;
 }
-
 
 /* ==================== FILE LOAD/SAVE HELPERS ==================== */
 // Create a Load button that loads JSON from file
@@ -1030,8 +1029,70 @@ function connect(){
     if(msg.type==='session'){ sessionDir=msg.dir; $('#session').textContent=sessionDir; }
     if (msg.type === 'tick') feedTick(msg);
     if (msg.type === 'batch' && msg.samples && msg.samples.length > 0) {
-      // Feed ALL samples from batch to charts (for proper display at low update rates)
-      msg.samples.forEach(sample => feedTick(sample));
+      // Efficiently process batch: add all samples to chart buffers, then render once
+      const samples = msg.samples;
+      console.log(`[BATCH] Received ${samples.length} samples, adding to charts...`);
+      
+      // Update state with the LAST sample (for widgets/buttons/current values)
+      const lastSample = samples[samples.length - 1];
+      if (lastSample.ai) state.ai = lastSample.ai;
+      if (lastSample.ao) state.ao = lastSample.ao;
+      if (lastSample.do) state.do = lastSample.do;
+      if (lastSample.tc) state.tc = lastSample.tc;
+      if (lastSample.pid) state.pid = lastSample.pid;
+      if (lastSample.motors) state.motors = lastSample.motors;
+      if (lastSample.le) state.le = lastSample.le;
+      if (lastSample.math) state.math = lastSample.math;
+      if (lastSample.expr) state.expr = lastSample.expr;
+      
+      // Add ALL samples to chart buffers efficiently
+      const t0 = performance.now() / 1000;
+      const acqRate = 200; // TODO: Get from server message or config
+      const sampleInterval = 1.0 / acqRate; // Time between samples in seconds
+      
+      for (const p of state.pages) {
+        for (const w of p.widgets) {
+          if (w.type !== 'chart') continue;
+          
+          const buf = chartBuffers.get(w.id) || [];
+          const series = w.opts.series || [];
+          
+          // Add all samples to buffer with proper time spacing
+          samples.forEach((sample, idx) => {
+            // Spread samples backward in time (oldest first)
+            // If we have 200 samples at 200 Hz, they span 1 second
+            const t = t0 - (samples.length - 1 - idx) * sampleInterval;
+            const values = series.map(sel => {
+              switch(sel.kind) {
+                case 'ai': return sample.ai?.[sel.index] ?? 0;
+                case 'ao': return sample.ao?.[sel.index] ?? 0;
+                case 'do': return (sample.do?.[sel.index] ? 1 : 0);
+                case 'tc': return sample.tc?.[sel.index] ?? 0;
+                case 'pid': return sample.pid?.[sel.index]?.out ?? 0;
+                case 'math': return sample.math?.[sel.index]?.output ?? 0;
+                case 'expr': return sample.expr?.[sel.index]?.output ?? 0;
+                case 'button': return state.buttonVars?.[sel.index] ?? 0;
+                default: return 0;
+              }
+            });
+            buf.push({t, v: values});
+          });
+          
+          // Trim old data
+          const chartSpan = Math.max(1, w.opts.span || 10);
+          const bufferDepth = chartSpan * 1.2;
+          while (buf.length && (t0 - buf[0].t) > bufferDepth) {
+            buf.shift();
+          }
+          
+          chartBuffers.set(w.id, buf);
+        }
+      }
+      
+      console.log(`[BATCH] Added ${samples.length} samples to ${state.pages.flatMap(p => p.widgets.filter(w => w.type === 'chart')).length} charts`);
+      
+      // Trigger single render update for widgets/buttons
+      updateDOButtons();
     }
   };
   updateConnectBtn();
