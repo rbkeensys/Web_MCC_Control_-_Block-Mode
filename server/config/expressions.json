@@ -76,7 +76,7 @@
       "name": "Spark",
       "enabled": true,
       "expression": "count2 = static.sparkCount\nstatic.prevSpark\ntestPrev = static.prevSpark      \ntestDO = \"DO:Spark\"\nbutton = buttonVars.sparkON\n\nIF button == 1 THEN\n    IF static.sparkCount >= 1 THEN\n        static.sparkCount = 0\n        \"DO:Spark\" = 1\n        static.prevSpark = 1\n    ELSE\n        static.sparkCount = 1\n        \"DO:Spark\" = 0\n        static.prevSpark = 0\n    ENDIF\nELSE\n    if testDO == 1 then\n        \"DO:Spark\" = 0\n        static.prevSpark = 0\n        testDO = \"DO:Spark\"\n    endif\nENDIF\n\n",
-      "execution_rate_hz": 50
+      "execution_rate_hz": 100
     }
   ]
 }

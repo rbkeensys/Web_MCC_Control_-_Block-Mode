@@ -1,5 +1,4 @@
-/**/
-const UI_VERSION = "1.7.2";  // FIXED batch timestamps! Now spreads samples over proper time span (1s for 200 samples @ 200Hz)
+const UI_VERSION = "1.8.1";  // Fixed: Now loads BOTH acq and display rates on startup
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -880,10 +879,34 @@ document.addEventListener('DOMContentLoaded', () => {
   ensureStarterPage();
   showVersions();
   loadConfigCache();
+  loadCurrentRates(); // Load actual rates from server
   connect();
   hookLogButtons();
   hookScriptButtons();
 });
+
+async function loadCurrentRates() {
+  try {
+    const response = await fetch('/api/rates');
+    const data = await response.json();
+    
+    // Update acquisition rate input
+    const acqInput = $('#rate');
+    if (acqInput && data.acq_rate) {
+      acqInput.value = data.acq_rate;
+    }
+    
+    // Update display rate input
+    const displayInput = $('#displayRate');
+    if (displayInput && data.display_rate) {
+      displayInput.value = data.display_rate;
+    }
+    
+    console.log(`[INIT] Loaded rates: Acq=${data.acq_rate} Hz, Display=${data.display_rate} Hz`);
+  } catch (e) {
+    console.error('Failed to load current rates:', e);
+  }
+}
 
 function wireUI(){
   $('#connectBtn')?.addEventListener('click', connect);
@@ -1034,6 +1057,13 @@ function connect(){
       const samples = msg.samples;
       console.log(`[BATCH] Received ${samples.length} samples, adding to charts...`);
       
+      // Debug: Check if DO values are changing
+      const doValues = samples.map(s => s.do?.[0]).filter(v => v !== undefined);
+      const uniqueDOs = [...new Set(doValues)];
+      if (uniqueDOs.length > 1) {
+        console.log(`[BATCH-DO] DO0 changed! Values: ${uniqueDOs.join(', ')} across ${samples.length} samples`);
+      }
+      
       // Update state with the LAST sample (for widgets/buttons/current values)
       const lastSample = samples[samples.length - 1];
       if (lastSample.ai) state.ai = lastSample.ai;
@@ -1048,7 +1078,7 @@ function connect(){
       
       // Add ALL samples to chart buffers efficiently
       const t0 = performance.now() / 1000;
-      const acqRate = 200; // TODO: Get from server message or config
+      const acqRate = msg.acq_rate || 200; // Use actual rate from server, fallback to 200
       const sampleInterval = 1.0 / acqRate; // Time between samples in seconds
       
       for (const p of state.pages) {
@@ -1079,11 +1109,13 @@ function connect(){
             buf.push({t, v: values});
           });
           
-          // Trim old data
-          const chartSpan = Math.max(1, w.opts.span || 10);
-          const bufferDepth = chartSpan * 1.2;
-          while (buf.length && (t0 - buf[0].t) > bufferDepth) {
-            buf.shift();
+          // Trim old data (but not when paused!)
+          if (!w.opts.paused) {
+            const chartSpan = Math.max(1, w.opts.span || 10);
+            const bufferDepth = chartSpan * 1.2;
+            while (buf.length && (t0 - buf[0].t) > bufferDepth) {
+              buf.shift();
+            }
           }
           
           chartBuffers.set(w.id, buf);
@@ -2879,9 +2911,11 @@ function updateChartBuffers(){
       const chartSpan = Math.max(1, w.opts.span || 10);
       const bufferDepth = chartSpan * 1.2; // Keep 20% extra for smooth scrolling
 
-      // Remove old data beyond the buffer depth
-      while (buf.length && (t - buf[0].t) > bufferDepth) {
-        buf.shift();
+      // Remove old data beyond the buffer depth (but not when paused!)
+      if (!w.opts.paused) {
+        while (buf.length && (t - buf[0].t) > bufferDepth) {
+          buf.shift();
+        }
       }
       chartBuffers.set(w.id,buf);
     }

@@ -92,6 +92,9 @@ class AppConfig(BaseModel):
     boards1608: Optional[List[Board1608Cfg]] = None
     boardsetc: Optional[List[BoardEtcCfg]] = None
     
+    # Display settings
+    display_rate_hz: Optional[float] = 25.0  # UI update rate
+    
     # Old flat-array format (for backward compatibility)
     board1608: Optional[Board1608Cfg] = None
     boardetc: Optional[BoardEtcCfg] = None

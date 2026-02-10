@@ -1,5 +1,8 @@
-
-__version__ = "5.19.2"  # Added cycle-start debug to show samples grabbed vs buffer size
+"""
+Version: 1.0.0
+Updated: 2026-01-14 23:30:56
+"""
+__version__ = "5.26.1"  # Added /api/rates endpoint to get current rates for frontend display
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -265,14 +268,26 @@ def _load_json_model(path: Path, model_cls: Type[BaseModel]):
             return MotorFile.model_validate({"motors": []})
         return model_cls.model_validate({})
 
+# Global rate variables (will be loaded from config below)
+acq_rate_hz: float = 100.0  # Default acquisition rate
+TARGET_UI_HZ: float = 25.0  # Default display update rate
+
 app_cfg = _load_json_model(CFG_PATH, AppConfig)
-print(f"[DEBUG] BEFORE migration: boards1608={app_cfg.boards1608 is not None}, board1608={app_cfg.board1608 is not None}")
 app_cfg = migrate_config_to_board_centric(app_cfg)  # Auto-migrate old configs
-print(f"[DEBUG] AFTER migration: boards1608={app_cfg.boards1608 is not None}, num_boards={len(app_cfg.boards1608) if app_cfg.boards1608 else 0}")
-print(f"[DEBUG] After migration: {len(get_all_analogs(app_cfg))} AI channels, {len(get_all_thermocouples(app_cfg))} TC channels")
+
+# Load acquisition rate from first enabled board
 if app_cfg.boards1608:
-    for i, board in enumerate(app_cfg.boards1608):
-        print(f"[DEBUG] E-1608 board {i}: boardNum={board.boardNum}, enabled={board.enabled}, AI={len(board.analogs)}, DO={len(board.digitalOutputs)}, AO={len(board.analogOutputs)}")
+    for board in app_cfg.boards1608:
+        if board.enabled:
+            acq_rate_hz = max(1.0, board.sampleRateHz)
+            print(f"[MCC-Hub] Loaded acquisition rate from config: {acq_rate_hz} Hz")
+            break
+
+# Load display rate from config
+if app_cfg.display_rate_hz:
+    TARGET_UI_HZ = app_cfg.display_rate_hz
+    print(f"[MCC-Hub] Loaded display rate from config: {TARGET_UI_HZ} Hz")
+
 pid_file = _load_json_model(PID_PATH, PIDFile)
 script_file = _load_json_model(SCRIPT_PATH, ScriptFile)
 MOTOR_PATH = CFG_DIR / "motor.json"
@@ -411,9 +426,7 @@ def evaluate_compiled_expressions(signal_state, bridge=None, sample_rate_hz=25.0
             
             # Apply hardware writes (NON-BLOCKING - use thread pool)
             if bridge and evaluator.hardware_writes:
-                print(f"[HW-DEBUG] {len(evaluator.hardware_writes)} hardware writes from expression '{expr.name}'")
                 for write in evaluator.hardware_writes:
-                    print(f"[HW-DEBUG]   Write: {write}")  # Show the full write dict
                     try:
                         # Cache key: type + channel
                         cache_key = f"{write['type']}_{write['channel']}"
@@ -430,7 +443,6 @@ def evaluate_compiled_expressions(signal_state, bridge=None, sample_rate_hz=25.0
                             if write['type'] == 'do':
                                 # Check if this DO is configured as blocking
                                 channel = write['channel']
-                                print(f"[DEBUG] Checking if DO{channel} is blocking...")
                                 for board_cfg in app_cfg.boards1608:
                                     if not board_cfg.enabled:
                                         continue
@@ -439,10 +451,8 @@ def evaluate_compiled_expressions(signal_state, bridge=None, sample_rate_hz=25.0
                                         do_idx = board_cfg.digitalOutputs.index(do_cfg)
                                         global_do_idx = board_idx * 8 + do_idx
                                         blocking_val = getattr(do_cfg, 'blocking', False)
-                                        print(f"[DEBUG]   DO{global_do_idx} ({do_cfg.name}): blocking={blocking_val}")
                                         if global_do_idx == channel and blocking_val:
                                             is_blocking_do = True
-                                            print(f"[DEBUG] *** MATCH! DO{channel} is blocking ***")
                                             break
                                     if is_blocking_do:
                                         break
@@ -522,14 +532,7 @@ lpf_tc = OnePoleLPFBank()
 ws_clients: List[WebSocket] = []
 session_logger: Optional[SessionLogger] = None
 run_task: Optional[asyncio.Task] = None
-# Get acquisition rate from first enabled E-1608 board
-acq_rate_hz: float = 100.0  # Default
-TARGET_UI_HZ: float = 25.0  # Display update rate (can be changed via API)
-if app_cfg.boards1608:
-    for board in app_cfg.boards1608:
-        if board.enabled:
-            acq_rate_hz = max(1.0, board.sampleRateHz)
-            break
+# Note: acq_rate_hz and TARGET_UI_HZ are loaded from config earlier (around line 270)
 _need_reconfig_filters = False
 
 @app.on_event("startup")
@@ -619,15 +622,13 @@ def burst_acquisition_thread():
     try:
         while burst_running.is_set():
             try:
-                # Calculate how often to read bursts based on requested rate
-                # Use MINIMAL bursts to minimize device lock time
-                # At 200 Hz with TARGET_UI_HZ display, we need acq_rate/UI_rate samples per cycle
-                # Use 2x that for safety margin
-                samples_per_display = max(1, int(acq_rate_hz / TARGET_UI_HZ))
-                block_size = max(2, samples_per_display * 2)
+                # Calculate block size based on ACQUISITION rate, not display rate
+                # Use 1/10th of acquisition rate (100ms of data) OR minimum 20 samples
+                # This keeps hardware lock time reasonable while allowing high sample rates
+                block_size = max(20, int(acq_rate_hz / 10))
                 
                 if burst_count == 0:
-                    print(f"[BURST] Block size: {block_size} samples ({block_size/acq_rate_hz*1000:.1f}ms lock time) for {TARGET_UI_HZ} Hz display")
+                    print(f"[BURST] Block size: {block_size} samples ({block_size/acq_rate_hz*1000:.1f}ms lock time) for {acq_rate_hz} Hz acquisition")
                 
                 burst_interval = block_size / max(1.0, acq_rate_hz)  # seconds between bursts
                 
@@ -716,7 +717,6 @@ async def acq_loop():
     # Prepare filters from config
     all_analogs = get_all_analogs(app_cfg)
     cutoff_list = [a.cutoffHz for a in all_analogs]
-    print(f"[DEBUG] Configuring LPF: {len(all_analogs)} channels, cutoffs={cutoff_list}")
     lpf.configure(
         rate_hz=acq_rate_hz,
         cutoff_list=cutoff_list,
@@ -786,10 +786,6 @@ async def acq_loop():
             # Sleep until next display update
             await asyncio.sleep(1.0 / TARGET_UI_HZ)
             
-            # Debug: Print every 100 ticks to show current rate
-            if ticks % 100 == 0:
-                print(f"[DISPLAY] Running at {TARGET_UI_HZ} Hz (expected {expected_samples if 'expected_samples' in dir() else '?'} samples/cycle)")
-            
             display_start = time.perf_counter()
             
             # Calculate expected samples for this cycle
@@ -806,13 +802,10 @@ async def acq_loop():
                 continue
             
             # Process min(expected, available) to avoid draining or underrunning
-            # This keeps buffer stable around 0-20 samples
             samples_to_grab = min(expected_samples, available_samples) if available_samples > 0 else 0
             
             if samples_to_grab == 0:
                 # Buffer empty - skip this cycle
-                if ticks % 100 == 0:
-                    print(f"[BUFFER] Empty! Skipping cycle...")
                 continue
             
             # Debug at low rates
@@ -853,15 +846,11 @@ async def acq_loop():
                 
                     if buffer_size == 0:
                         # Buffer empty - skip this sample (acquisition warming up)
-                        if ticks == 0 or ticks % 100 == 0:
-                            print(f"[BUFFER] Empty! Waiting for acquisition to start...")
                         continue  # Skip to next sample
                     else:
                         ai_raw = sample_buffer.popleft()
                     
-                        # Monitor buffer health
-                        if ticks % 100 == 0:
-                            print(f"[BUFFER] Size: {buffer_size} samples")
+                        # Monitor buffer health (removed debug print)
                 
                 t3 = time.perf_counter()
                 
@@ -1102,10 +1091,29 @@ async def acq_loop():
                         return {k: clean_for_json(v) for k, v in obj.items()}
                     return obj
 
+                # Generate synthetic triangle wave (1 second period)
+                # Use sample counter for perfect spacing (not wall-clock time)
+                # This ensures each sample gets a unique value regardless of processing speed
+                if not hasattr(acq_loop, 'triangle_sample_count'):
+                    acq_loop.triangle_sample_count = 0
+                
+                # Calculate phase based on sample count and acquisition rate
+                # At 1000 Hz, 1000 samples = 1 second period
+                phase = (acq_loop.triangle_sample_count / acq_rate_hz) % 1.0
+                if phase < 0.5:
+                    triangle_value = phase * 2.0  # Rising: 0 to 1
+                else:
+                    triangle_value = 2.0 - phase * 2.0  # Falling: 1 to 0
+                
+                acq_loop.triangle_sample_count += 1
+                
+                # Add synthetic signal to ai_scaled list
+                ai_with_synthetic = list(ai_scaled) + [triangle_value]
+
                 frame = {
                     "type": "tick",
                     "t": time.time(),
-                    "ai": clean_for_json(ai_scaled),
+                    "ai": clean_for_json(ai_with_synthetic),  # Include synthetic signal
                     "ao": clean_for_json(ao),
                     "do": do,
                     "tc": clean_for_json(tc_vals),
@@ -1150,7 +1158,7 @@ async def acq_loop():
                     "le": le_tel,
                     "expr": last_expr_outputs,  # Previous cycle expressions (avoid circular dependency)
                     "buttonVars": button_vars,  # Button variables from frontend
-                    "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)],
+                    "ai_list": [{"name": ch.name} for ch in get_all_analogs(app_cfg)] + [{"name": "△ Triangle (1s)"}],  # Add synthetic signal
                     "ao_list": [{"name": ch.name} for ch in get_all_analog_outputs(app_cfg)],
                     "tc_list": [{"name": ch.name} for ch in get_all_thermocouples(app_cfg)],
                     "do_list": [{"name": ch.name} for ch in get_all_digital_outputs(app_cfg)],
@@ -1207,7 +1215,8 @@ async def acq_loop():
                 batch_msg = {
                     "type": "batch",
                     "samples": frames_this_cycle,
-                    "count": len(frames_this_cycle)
+                    "count": len(frames_this_cycle),
+                    "acq_rate": acq_rate_hz  # Tell frontend actual sample rate for proper timestamps
                 }
                 asyncio.create_task(broadcast(batch_msg))  # Fire and forget!
                 
@@ -1252,7 +1261,25 @@ async def acq_loop():
 def get_config():
     # read latest from disk so external edits are visible
     cfg = _load_json_model(CFG_PATH, AppConfig)
-    return cfg.model_dump()
+    cfg_dict = cfg.model_dump()
+    
+    # Add synthetic test signal to AI list for frontend display
+    # Find which board to add it to (use first enabled board, or create a virtual one)
+    if cfg_dict.get('boards1608') and len(cfg_dict['boards1608']) > 0:
+        # Add to last board's analog list
+        last_board = cfg_dict['boards1608'][-1]
+        if 'analogs' not in last_board:
+            last_board['analogs'] = []
+        # Add synthetic signal
+        last_board['analogs'].append({
+            'name': 'Test',
+            'enabled': True,
+            'cutoffHz': 0,
+            'slope': 1.0,
+            'offset': 0.0
+        })
+    
+    return cfg_dict
 
 @app.put("/api/config")
 def put_config(body: dict):
@@ -1353,8 +1380,8 @@ def check_expression_syntax(body: dict):
     
     # Build test signal state with current config
     test_state = {
-        'ai_list': [{'name': ch.name} for ch in get_all_analogs(app_cfg)],
-        'ai': [0.0] * len(get_all_analogs(app_cfg)),
+        'ai_list': [{'name': ch.name} for ch in get_all_analogs(app_cfg)] + [{'name': '△ Triangle (1s)'}],
+        'ai': [0.0] * len(get_all_analogs(app_cfg)) + [0.5],  # Add synthetic value
         'ao_list': [{'name': ch.name} for ch in (get_all_analog_outputs(app_cfg) or [])],
         'ao': [0.0] * len(get_all_analog_outputs(app_cfg) or []),
         'tc_list': [{'name': tc.name} for tc in (get_all_thermocouples(app_cfg) or [])],
@@ -1552,10 +1579,26 @@ def set_rate(req: RateReq):
 
 @app.post("/api/display/rate")
 def set_display_rate(req: RateReq):
-    global TARGET_UI_HZ
-    TARGET_UI_HZ = max(1.0, min(100.0, float(req.hz)))
-    print(f"[MCC-Hub] Display rate set to {TARGET_UI_HZ} Hz")
+    global TARGET_UI_HZ, app_cfg
+    TARGET_UI_HZ = max(1.0, min(500.0, float(req.hz)))
+    
+    # Save to config
+    app_cfg.display_rate_hz = TARGET_UI_HZ
+    try:
+        CFG_PATH.write_text(json.dumps(app_cfg.model_dump(), indent=2))
+        print(f"[MCC-Hub] Display rate set to {TARGET_UI_HZ} Hz and saved to config")
+    except Exception as e:
+        print(f"[MCC-Hub] Display rate set to {TARGET_UI_HZ} Hz but failed to save: {e}")
+    
     return {"ok": True, "rate": TARGET_UI_HZ}
+
+@app.get("/api/rates")
+def get_rates():
+    """Get current acquisition and display rates"""
+    return {
+        "acq_rate": acq_rate_hz,
+        "display_rate": TARGET_UI_HZ
+    }
 
 # Old rate endpoint continues below...
 
