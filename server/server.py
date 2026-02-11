@@ -2,7 +2,7 @@
 Version: 1.0.0
 Updated: 2026-01-14 23:30:56
 """
-__version__ = "5.28.3"  # Keep min buffer (1000 samples) for pre-trigger, don't drain buffer completely
+__version__ = "5.28.4"  # PERFORMANCE: Skip Math/PID/LE in scope mode (saves ~200ms per 1000 samples!)
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -988,63 +988,81 @@ async def acq_loop():
                     print(f"[TIMING-DEBUG] AI scaling + DO/AO took {(t5-t4)*1000:.1f}ms")
 
                 # --- Math Operators ---
-                t_math_start = time.perf_counter()
-                # Evaluate first so LEs can use math outputs
-                # Use previous cycle's PID data (avoids circular dependency)
-                math_tel = math_mgr.evaluate_all({
-                    "ai": ai_scaled,
-                    "ao": ao,
-                    "tc": tc_vals,
-                    "pid": last_pid_telemetry,  # Previous cycle PID data
-                    "le": []    # LEs haven't been evaluated with math yet
-                }, bridge=mcc)
-                t_math = time.perf_counter() - t_math_start
+                # SCOPE MODE OPTIMIZATION: Skip math/PID/LE if scope is enabled
+                # These are expensive (~200ms per 1000 samples) and not needed for scope display
+                skip_expensive_processing = (scope_processor and scope_processor.trigger_state.enabled)
+                
+                if not skip_expensive_processing:
+                    t_math_start = time.perf_counter()
+                    # Evaluate first so LEs can use math outputs
+                    # Use previous cycle's PID data (avoids circular dependency)
+                    math_tel = math_mgr.evaluate_all({
+                        "ai": ai_scaled,
+                        "ao": ao,
+                        "tc": tc_vals,
+                        "pid": last_pid_telemetry,  # Previous cycle PID data
+                        "le": []    # LEs haven't been evaluated with math yet
+                    }, bridge=mcc)
+                    t_math = time.perf_counter() - t_math_start
+                else:
+                    math_tel = []
+                    t_math = 0.0
 
                 # --- Logic Elements ---
-                t_le_start = time.perf_counter()
-                # Evaluate AFTER Math but BEFORE PIDs so PIDs can use LE outputs as enable gates
-                le_outputs = le_mgr.evaluate_all({
-                    "ai": ai_scaled,
-                    "ao": ao,
-                    "do": do,
-                    "tc": tc_vals,
-                    "pid": [],  # PIDs haven't run yet
-                    "math": math_tel  # Now LEs can use math outputs
-                })
-                le_tel = le_mgr.get_telemetry()
-                t_le = time.perf_counter() - t_le_start
+                if not skip_expensive_processing:
+                    t_le_start = time.perf_counter()
+                    # Evaluate AFTER Math but BEFORE PIDs so PIDs can use LE outputs as enable gates
+                    le_outputs = le_mgr.evaluate_all({
+                        "ai": ai_scaled,
+                        "ao": ao,
+                        "do": do,
+                        "tc": tc_vals,
+                        "pid": [],  # PIDs haven't run yet
+                        "math": math_tel  # Now LEs can use math outputs
+                    })
+                    le_tel = le_mgr.get_telemetry()
+                    t_le = time.perf_counter() - t_le_start
+                else:
+                    le_outputs = []
+                    le_tel = []
+                    t_le = 0.0
 
                 # --- PIDs (may drive DO/AO) ---
-                t_pid_start = time.perf_counter()
-                # Pass DO/LE/Math/Expr state so PIDs can use them
-                # Pass previous cycle's PID and Expr telemetry for inputs/gates
-                telemetry = pid_mgr.step(
-                    ai_vals=ai_scaled,
-                    tc_vals=tc_vals,
-                    bridge=mcc,
-                    do_state=do,
-                    le_state=le_tel,  # Now has updated LE state with math
-                    pid_prev=last_pid_telemetry,
-                    math_outputs=[m.get("output", 0.0) for m in math_tel],
-                    expr_outputs=last_expr_outputs,  # Previous cycle's expression outputs
-                    sample_rate_hz=acq_rate_hz
-                )
-            
-                # Store for next cycle
-                last_pid_telemetry = telemetry
-                t_pid = time.perf_counter() - t_pid_start
+                if not skip_expensive_processing:
+                    t_pid_start = time.perf_counter()
+                    # Pass DO/LE/Math/Expr state so PIDs can use them
+                    # Pass previous cycle's PID and Expr telemetry for inputs/gates
+                    telemetry = pid_mgr.step(
+                        ai_vals=ai_scaled,
+                        tc_vals=tc_vals,
+                        bridge=mcc,
+                        do_state=do,
+                        le_state=le_tel,  # Now has updated LE state with math
+                        pid_prev=last_pid_telemetry,
+                        math_outputs=[m.get("output", 0.0) for m in math_tel],
+                        expr_outputs=last_expr_outputs,  # Previous cycle's expression outputs
+                        sample_rate_hz=acq_rate_hz
+                    )
+                
+                    # Store for next cycle
+                    last_pid_telemetry = telemetry
+                    t_pid = time.perf_counter() - t_pid_start
+                else:
+                    telemetry = []
+                    t_pid = 0.0
 
                 # --- Logic Elements (Re-evaluation) ---
-                # Re-evaluate LEs after PIDs so LEs can use PID outputs as inputs
-                le_outputs = le_mgr.evaluate_all({
-                    "ai": ai_scaled,
-                    "ao": ao,
-                    "do": do,
-                    "tc": tc_vals,
-                    "pid": telemetry,
-                    "math": math_tel  # Keep math available
-                })
-                le_tel = le_mgr.get_telemetry()
+                if not skip_expensive_processing:
+                    # Re-evaluate LEs after PIDs so LEs can use PID outputs as inputs
+                    le_outputs = le_mgr.evaluate_all({
+                        "ai": ai_scaled,
+                        "ao": ao,
+                        "do": do,
+                        "tc": tc_vals,
+                        "pid": telemetry,
+                        "math": math_tel  # Keep math available
+                    })
+                    le_tel = le_mgr.get_telemetry()
 
                 # Expressions moved outside loop - evaluated once per batch
                 expr_tel = []  # Will be populated after loop

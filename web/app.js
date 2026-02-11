@@ -1,4 +1,4 @@
-const UI_VERSION = "1.16.5";  // Fixed trigger source dropdown to show all AI channels (not just graphed series)
+const UI_VERSION = "1.16.6";  // Proper oscilloscope 1-2-5 time/div sequence (1,2,5,10,20,50,100...)
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2038,14 +2038,29 @@ function openWidgetSettings(w) {
       });
       
       // Time/Division selector (for scope mode)
+      // Use standard oscilloscope 1-2-5 sequence
       const timePerDivOptions = [
         ['1 µs', 0.000001],
+        ['2 µs', 0.000002],
+        ['5 µs', 0.000005],
         ['10 µs', 0.00001],
+        ['20 µs', 0.00002],
+        ['50 µs', 0.00005],
         ['100 µs', 0.0001],
+        ['200 µs', 0.0002],
+        ['500 µs', 0.0005],
         ['1 ms', 0.001],
+        ['2 ms', 0.002],
+        ['5 ms', 0.005],
         ['10 ms', 0.01],
+        ['20 ms', 0.02],
+        ['50 ms', 0.05],
         ['100 ms', 0.1],
+        ['200 ms', 0.2],
+        ['500 ms', 0.5],
         ['1 s', 1.0],
+        ['2 s', 2.0],
+        ['5 s', 5.0],
         ['10 s', 10.0]
       ];
       const timePerDivSelect = el('select', {});
