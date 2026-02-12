@@ -1,0 +1,10 @@
+{
+  "expressions": [
+    {
+      "name": "test1",
+      "enabled": true,
+      "expression": "// Write your expression here\nstatic.sparkCount\n\nIF static.sparkCount == 2 THEN\n    static.sparkCount = 0\nELSE\n    static.sparkCount = static.sparkCount + 1\nENDIF",
+      "execution_rate_hz": 10
+    }
+  ]
+}
