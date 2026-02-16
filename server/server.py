@@ -632,11 +632,9 @@ def burst_acquisition_thread():
                 
                 burst_interval = block_size / max(1.0, acq_rate_hz)  # seconds between bursts
                 
-                # Wait until it's time for next burst
-                now = time.perf_counter()
-                time_since_last = now - last_burst
-                if time_since_last < burst_interval:
-                    time.sleep(burst_interval - time_since_last)
+                # DON'T SLEEP - keep buffer filled continuously!
+                # The acq_loop will throttle consumption based on TARGET_UI_HZ
+                # NO: time.sleep(burst_interval - time_since_last)
                 
                 last_burst = time.perf_counter()
                 
