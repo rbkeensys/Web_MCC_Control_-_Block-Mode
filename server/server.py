@@ -47,9 +47,23 @@ MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per se
 MCC_DUMP_FIRST = int(os.environ.get("MCC_DUMP_FIRST", "5")) # dump first N ticks fully
 
 ROOT = Path(__file__).resolve().parent.parent
-CFG_DIR = ROOT/"server/config"
-WEB_DIR = ROOT/"web"
-LOGS_DIR = ROOT/"server"/"logs"
+
+# INSTALLER FIX: Detect if running as PyInstaller executable
+if getattr(sys, 'frozen', False):
+    # Running as .exe - use installed location
+    if os.environ.get('LOCALAPPDATA'):
+        ROOT = Path(os.environ['LOCALAPPDATA']) / 'MCC_DAQ'
+    else:
+        ROOT = Path(sys.executable).parent
+    CFG_DIR = ROOT / "config"
+    WEB_DIR = ROOT / "web"
+    LOGS_DIR = ROOT / "logs"
+else:
+    # Running as script - use original paths
+    CFG_DIR = ROOT/"server/config"
+    WEB_DIR = ROOT/"web"
+    LOGS_DIR = ROOT/"server"/"logs"
+
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # env toggles (all optional)
@@ -1333,7 +1347,7 @@ def reload_expressions():
     global expr_ast_cache, expr_mgr, app_cfg
     try:
         # Re-read config
-        cfg_path = Path(__file__).parent / "config.json"
+        cfg_path = CFG_DIR / "config.json"
         with open(cfg_path) as f:
             new_cfg = json.load(f)
         

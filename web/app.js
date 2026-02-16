@@ -1,4 +1,4 @@
-const UI_VERSION = "1.8.1";  // Fixed: Now loads BOTH acq and display rates on startup
+const UI_VERSION = "1.8.2";  // Fixed: Chart zoom no longer scrolls away; added Reset Zoom button
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -2335,6 +2335,11 @@ function widgetOptions(w){
 
     opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause);
   }
+    // Add reset zoom button if zoomed
+    if (w.view && w.view.paused) {
+      const resetZoom = el("button", {className:"btn", style:"background:#2d334f;color:#79c0ff", title:"Reset zoom (or double-click)", onclick:()=>{ w.view.span = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10); w.view.paused = false; }}, "🔍 Reset");
+      opts.push(resetZoom);
+    }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
     yGrid.oninput=()=>{ w.opts.yGridLines=parseInt(yGrid.value)||5; };
@@ -2390,9 +2395,16 @@ function mountChart(w, body){
       const base = (w.view.span || (window.GLOBAL_BUFFER_SPAN || 10));
       w.view.span = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
       w.opts.span = w.view.span; // Keep in sync
-      const buf = chartBuffers.get(w.id) || [];
+      
+      // CRITICAL FIX: Freeze at CURRENT TIME when first zooming, not buffer end
+      // This prevents the "scrolling away" effect
+      if (!w.view.paused) {
+        // First zoom - freeze at current view end
+        const buf = chartBuffers.get(w.id) || [];
+        w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
+      }
+      // If already paused, keep existing freeze time (don't update it!)
       w.view.paused = true;
-      w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
     }
   }, {passive:false});
 
