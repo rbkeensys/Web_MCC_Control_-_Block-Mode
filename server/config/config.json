@@ -10,7 +10,7 @@
         {
           "name": "LOX P",
           "slope": 25.31680784977651,
-          "offset": -12.995338126038387,
+          "offset": -12.9991239035794,
           "cutoffHz": 0.1,
           "units": "psi",
           "include": true
@@ -18,7 +18,7 @@
         {
           "name": "Fuel P",
           "slope": 37.56151857509841,
-          "offset": -18.675759437040202,
+          "offset": -18.61924750876407,
           "cutoffHz": 0.1,
           "units": "psi",
           "include": true

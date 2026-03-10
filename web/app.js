@@ -2573,10 +2573,14 @@ function mountChart(w, body){
         w.view.tFreeze = 0;
         w.view.span = nativeSpan;
       } else {
-        // Zooming in — freeze the view
+        // Zooming in — freeze at current edge only if not already panned
         const buf = chartBuffers.get(w.id) || [];
+        if (!w.view.paused) {
+          // First zoom: snap freeze to live edge
+          w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
+        }
+        // else: already paused/panned — keep existing tFreeze so zoom centres on current view
         w.view.paused = true;
-        w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
       }
     }
   }, {passive:false});
@@ -2589,12 +2593,56 @@ function mountChart(w, body){
 
   chartCursor.set(w.id, {x:null, mode:w.opts.cursorMode||'follow', ctxEl:null});
 
+  // Pan state — left-drag pans tFreeze when zoom-paused
+  let _panActive = false;
+  let _panStartX = 0;
+  let _panStartFreeze = 0;
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;                // left button only
+    if (!w.view.paused) return;                // only pan when zoomed/paused
+    e.stopPropagation();                       // don't trigger widget drag
+    _panActive = true;
+    _panStartX = e.clientX;
+    _panStartFreeze = w.view.tFreeze || (chartBuffers.get(w.id)||[]).slice(-1)[0]?.t || 0;
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+  });
+
   canvas.addEventListener('mousemove', (e)=>{
     const rect=canvas.getBoundingClientRect(); const x=e.clientX-rect.left;
     const cur=chartCursor.get(w.id); if(!cur) return;
     cur.x=x; chartCursor.set(w.id,cur);
+
+    if (_panActive) {
+      // Pixels → time: dx pixels * (viewSpan / plotWidth) = dt seconds
+      const plotW = rect.width - 60 - 10; // plotL=60, plotR=W-10
+      const viewSpan = w.view.span || w.opts.span || 10;
+      const dtPerPx = viewSpan / plotW;
+      const dx = e.clientX - _panStartX;
+      const newFreeze = _panStartFreeze - dx * dtPerPx; // drag left → go back in time
+
+      // Clamp: can't go past end of buffer or before start of buffer
+      const buf = chartBuffers.get(w.id) || [];
+      if (buf.length) {
+        const bufStart = buf[0].t + viewSpan;   // earliest valid t1
+        const bufEnd   = buf[buf.length-1].t;   // latest valid t1
+        w.view.tFreeze = Math.max(bufStart, Math.min(bufEnd, newFreeze));
+      }
+      e.preventDefault();
+    }
   });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (_panActive) {
+      _panActive = false;
+      canvas.style.cursor = '';
+    }
+  });
+
   canvas.addEventListener('mouseleave', ()=>{
+    _panActive = false;
+    canvas.style.cursor = '';
     const cur=chartCursor.get(w.id);
     if(cur){ cur.x=null; chartCursor.set(w.id,cur); }
   });
@@ -2613,6 +2661,8 @@ function mountChart(w, body){
     const W=canvas.clientWidth, H=canvas.clientHeight;
     canvas.width=W; canvas.height=H;
     const plotL=60, plotR=W-10, plotT=10, plotB=H-30;
+    // Show grab cursor when paused so user knows they can pan
+    if (!_panActive) canvas.style.cursor = w.view.paused ? 'grab' : '';
 
     ctx.clearRect(0,0,W,H);
     ctx.strokeStyle='#3b425e'; ctx.lineWidth=1;
@@ -3153,10 +3203,9 @@ function updateChartBuffers(){
       }
       buf.push({t, tServer: (typeof state !== 'undefined' && state.lastT) || t, v: filtered});
 
-      // Keep enough history for both live span AND any active zoom-out view
+      // Keep 2× native span so the user can pan back one full screen while zoomed
       const chartSpan = Math.max(1, w.opts.span || 10);
-      const viewSpanNow = (w.view && w.view.span) ? w.view.span : chartSpan;
-      const bufferDepth = Math.max(chartSpan, viewSpanNow) * 1.5;
+      const bufferDepth = chartSpan * 2.0;
 
       // Remove old data beyond the buffer depth
       while (buf.length && (t - buf[0].t) > bufferDepth) {
@@ -3772,9 +3821,12 @@ function mountPIDPanel(w, body){
   let dragOffsetX = 0, dragOffsetY = 0;
   
   header.onmousedown = (e) => {
+    if (e.target.tagName === 'SPAN' && e.target.style.cursor === 'pointer') return; // close btn
+    bringToFront(detailsPanel);
     isDragging = true;
-    dragOffsetX = e.clientX - detailsPanel.offsetLeft;
-    dragOffsetY = e.clientY - detailsPanel.offsetTop;
+    const r = detailsPanel.getBoundingClientRect();
+    dragOffsetX = e.clientX - r.left;
+    dragOffsetY = e.clientY - r.top;
     e.preventDefault();
   };
   

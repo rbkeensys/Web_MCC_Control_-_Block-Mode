@@ -302,6 +302,7 @@ table.form input[type="checkbox"] { width:auto; }
 /* When replay controls are visible, adjust */
 #replayControls:not([style*="display: none"]) ~ main.workspace {
   height: calc(100vh - 144px); /* topbar + replay + script controls */
+} 144px); /* topbar + replay + script controls */
 }
 /* ================================================================
    Checklist Widget  (checklist_widget.js / checklist_editor.js)
@@ -422,8 +423,7 @@ table.form input[type="checkbox"] { width:auto; }
 .cl-dock {
   position: fixed;
   top: 50px;
-  left: 50%;
-  transform: translateX(-50%);
+  left: calc(50% - 300px);
   width: 600px;
   min-width: 340px;
   min-height: 200px;
@@ -463,3 +463,19 @@ table.form input[type="checkbox"] { width:auto; }
   line-height: 1;
 }
 .cl-drag-close:hover { color: #f0caca; }
+
+/* ---- resize/z-order fixes (appended) ---- */
+
+/* Modal: anchor to top so resize:both grows down-right from top-left corner */
+.modal {
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 4vh;
+  overflow: auto;
+}
+
+/* Checklist dock: use explicit left instead of transform so resize anchors top-left */
+.cl-dock {
+  left: calc(50% - 300px);
+  transform: none;
+}

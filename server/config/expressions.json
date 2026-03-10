@@ -39,7 +39,7 @@
     {
       "name": "LOXFuelOutletControl",
       "enabled": true,
-      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nLOXOut = buttonVars.LOXOutEn\nFuelOut = buttonVars.FuelOutEn\nboth    = buttonVars.BothOutEn\ngoLOX = 0\ngoFuel = 0\n\nif (LOXOut == 1) or (both == 1) then\n    goLOX = 1\nendif\n\"DO:LOXOUT\" = not(goLOX)\n\nif (FuelOut == 1) or (both == 1) then\n    goFuel = 1\nendif\n\"DO:FuelOUT\" = not(goFuel)\n",
+      "expression": "// Controls individually and together the LOX and Fuel outlet valves\n\nLOXOut = buttonVars.LOXOutEn\nFuelOut = buttonVars.FuelOutEn\nboth    = buttonVars.BothOutEn\ngoLOX = 0\ngoFuel = 0\n\nif (LOXOut == 1) or (both == 1) then\n    goLOX = 1\nendif\n\"DO:LOXOUT\" = goLOX\n\nif (FuelOut == 1) or (both == 1) then\n    goFuel = 1\nendif\n\"DO:FuelOUT\" = goFuel\n",
       "execution_rate_hz": null
     }
   ]
