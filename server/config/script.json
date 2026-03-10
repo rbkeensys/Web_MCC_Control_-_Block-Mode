@@ -15,27 +15,18 @@
       "state": true,
       "type": "buttonVar",
       "channel": 1,
-      "duration": 0.2,
+      "duration": 0.1,
       "value": 1,
       "varName": "sparkON"
     },
     {
-      "time": 1,
-      "relays": [
-        false,
-        true,
-        false,
-        true,
-        false,
-        false,
-        false,
-        false
-      ],
+      "time": 0.1,
+      "duration": 0,
       "type": "buttonVar",
-      "channel": 1,
-      "value": 0,
-      "varName": "sparkON",
-      "duration": 0
+      "channel": 0,
+      "state": false,
+      "normallyOpen": true,
+      "varName": "sparkON"
     }
   ]
 }

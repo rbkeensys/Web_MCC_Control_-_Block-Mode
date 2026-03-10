@@ -4,43 +4,10 @@
       "name": "Page 1",
       "widgets": [
         {
-          "id": "39b6099c-b713-4279-bf1b-d629922f8cf3",
-          "type": "dobutton",
-          "x": 87,
-          "y": 93,
-          "w": 166,
-          "h": 104,
-          "opts": {
-            "title": "Spark",
-            "outputType": "var",
-            "doIndex": 0,
-            "varName": "sparkON",
-            "activeHigh": true,
-            "mode": "toggle",
-            "buzzHz": 10,
-            "actuationTime": 0,
-            "_timer": null
-          }
-        },
-        {
-          "id": "5b0a69f5-cb75-42a3-a70f-4cd7daf8fbab",
-          "type": "expr",
-          "x": 413,
-          "y": 99,
-          "w": 350,
-          "h": 200,
-          "opts": {
-            "title": "Spark",
-            "exprIndex": 12,
-            "showSource": true,
-            "showOutput": true
-          }
-        },
-        {
           "id": "e9172e3e-d576-4955-9783-01fb7ba77e6f",
           "type": "chart",
-          "x": 78,
-          "y": 344,
+          "x": 317,
+          "y": 16,
           "w": 1740,
           "h": 532,
           "opts": {
@@ -72,8 +39,8 @@
         {
           "id": "18940384-6c8b-4e66-a53c-909592d495af",
           "type": "dobutton",
-          "x": 170,
-          "y": 946,
+          "x": 951,
+          "y": 591,
           "w": 156,
           "h": 94,
           "opts": {
@@ -92,8 +59,8 @@
         {
           "id": "fe2a5123-2682-460c-a3d3-c0ecf84bc61a",
           "type": "dobutton",
-          "x": 342,
-          "y": 947,
+          "x": 778,
+          "y": 589,
           "w": 165,
           "h": 94,
           "opts": {
@@ -102,12 +69,25 @@
             "doIndex": 0,
             "varName": "button1",
             "activeHigh": false,
-            "mode": "toggle",
+            "mode": "momentary",
             "buzzHz": 10,
             "actuationTime": 0,
             "_timer": null
           },
           "debugCount": 8
+        },
+        {
+          "id": "3a58e7eb-7e20-44b6-86d7-89ddb090dfb5",
+          "type": "pidpanel",
+          "x": 17,
+          "y": 14,
+          "w": 284,
+          "h": 700,
+          "opts": {
+            "title": "PID: Mini Dewar P",
+            "loopIndex": 3,
+            "showControls": true
+          }
         }
       ]
     }

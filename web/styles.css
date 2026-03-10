@@ -303,3 +303,163 @@ table.form input[type="checkbox"] { width:auto; }
 #replayControls:not([style*="display: none"]) ~ main.workspace {
   height: calc(100vh - 144px); /* topbar + replay + script controls */
 }
+/* ================================================================
+   Checklist Widget  (checklist_widget.js / checklist_editor.js)
+   ================================================================ */
+
+.cl-panel {
+  background: var(--card);
+  border-radius: 8px;
+  border: 1px solid #262a3e;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  outline: none;
+}
+.cl-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 6px 4px;
+  border-bottom: 1px solid #1f2330;
+  align-items: center;
+}
+.cl-btn { padding: 3px 7px; font-size: 11px; }
+.cl-status {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 4px;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cl-table-wrap { overflow: auto; flex: 1; min-height: 80px; }
+.cl-table { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.cl-th {
+  background: #1a1d2e;
+  color: #a8b3cf;
+  font-style: italic;
+  font-size: 11px;
+  padding: 4px 5px;
+  border-bottom: 1px solid #252a3f;
+  white-space: nowrap;
+  text-align: center;
+}
+.cl-th.cl-item { text-align: left; }
+.cl-num  { width: 38px; }
+.cl-dest { width: 46px; }
+.cl-item { width: auto; }
+.cl-chk  { width: 28px; }
+.cl-dur  { width: 52px; }
+.cl-time { width: 70px; }
+.cl-td {
+  padding: 5px 5px;
+  text-align: center;
+  border-bottom: 1px solid #1b1e2e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-td.cl-item { text-align: left; }
+.cl-td.cl-comment-text { text-align: left; color: #7a8199; font-style: italic; }
+.cl-tr.cl-active td {
+  font-weight: 700;
+  font-size: 14px;
+  background: #1a1f35;
+  color: #e8e0b0;
+}
+.cl-tr.cl-checked td {
+  font-style: italic;
+  text-decoration: line-through;
+  color: #60685a;
+}
+.cl-tr.cl-active.cl-checked td {
+  font-weight: 700;
+  font-size: 14px;
+  font-style: normal;
+  text-decoration: line-through;
+  color: #7a8a6a;
+  background: #1a1f2a;
+}
+.cl-tr:hover td { background: rgba(255,255,255,0.03); }
+.cl-comment { background: #111420; }
+.cl-comment td { font-size: 11px; }
+.cl-hint {
+  font-size: 10px;
+  color: #555c73;
+  padding: 3px 6px;
+  border-top: 1px solid #1b1e2e;
+}
+/* Editor modal */
+.cl-editor-panel { width: min(960px, 97vw); max-height: 90vh; overflow: auto; }
+.cl-editor-table-wrap { overflow: auto; max-height: calc(90vh - 160px); margin-top: 4px; }
+.cl-editor-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.cl-editor-table th {
+  background: #1a1d2e;
+  padding: 6px 5px;
+  font-weight: 600;
+  color: #a8b3cf;
+  border-bottom: 1px solid #252a3f;
+  white-space: nowrap;
+  text-align: left;
+}
+.cl-editor-table td { padding: 4px 4px; border-bottom: 1px solid #1b1e2e; vertical-align: middle; }
+.cl-editor-table tbody tr:hover { background: rgba(255,255,255,0.03); }
+.cl-ed-selected { background: #1a2040 !important; }
+.cl-ed-in {
+  background: #1a1e30;
+  border: 1px solid #2c3150;
+  border-radius: 4px;
+  color: var(--fg);
+  padding: 2px 4px;
+  font-size: 12px;
+  width: 100%;
+}
+.cl-ed-wide { width: 100%; min-width: 180px; }
+
+/* Checklist dock panel - draggable floating panel */
+.cl-dock {
+  position: fixed;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  min-width: 340px;
+  min-height: 200px;
+  max-width: 98vw;
+  max-height: calc(100vh - 60px);
+  z-index: 5000;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #2b3154;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  background: var(--card);
+  overflow: hidden;
+  resize: both;
+}
+.cl-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: #11131a;
+  border-bottom: 1px solid #1f2330;
+  cursor: grab;
+  user-select: none;
+  border-radius: 10px 10px 0 0;
+  flex-shrink: 0;
+}
+.cl-drag-handle:active { cursor: grabbing; }
+.cl-drag-handle span { font-size: 12px; color: #a8b3cf; font-weight: 600; }
+.cl-drag-close {
+  background: none;
+  border: none;
+  color: #9094a1;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.cl-drag-close:hover { color: #f0caca; }

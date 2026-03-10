@@ -1,4 +1,4 @@
-const UI_VERSION = "1.7.6";  // Duration support for ALL event types  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
+const UI_VERSION = "1.8.0";  // Checklist widget + chart check events  // Fix buttonVar replay: case-preserve + var-btn renders when disconnected  // Duration support for ALL event types  // 2026-01-27: Fixed buttonVars in charts/gauges/bars + removed debug
 
 /* ----------------------------- helpers ---------------------------------- */
 const $ = sel => document.querySelector(sel);
@@ -95,28 +95,108 @@ function parseCSV(text){
   const lines = text.split(/\r?\n/).filter(Boolean);
   if (lines.length < 2) return {cols:[], rows:[]};
   const cols = lines[0].split(',').map(s=>s.trim());
-  const rows = lines.slice(1).map(line => line.split(',').map(v=>Number(v)));
+  // Find chk_events column index — its values are JSON strings, not numbers
+  const chkCol = cols.findIndex(c => c.toLowerCase() === 'chk_events');
+  const rows = lines.slice(1).map(line => {
+    const parts = line.split(',');
+    return parts.map((v, i) => (i === chkCol) ? v : Number(v));
+  });
+  // On load: restore check events from the first non-empty chk_events cell
+  if (chkCol >= 0 && window.loadCheckEventsFromLog) {
+    for (const row of rows) {
+      const val = row[chkCol];
+      if (typeof val === 'string' && val.trim().startsWith('[')) {
+        window.loadCheckEventsFromLog(val);
+        break;
+      }
+    }
+  }
   return { cols, rows };
 }
 
 function makeTickFromRow(cols, row){
   const obj = { type:'tick' };
   const ai=[], ao=[], dob=[], tc=[];
+  // pid[N] collects field fragments; expr[N] is a scalar output
+  const pidMap = {};   // index -> {pv,sp,u,out,err,p_term,i_term,d_term,enabled,name}
+  const exprMap = {};  // index -> output float
+  const globalVars = {};
+  const buttonVars = {};
+
   for(let c=0;c<cols.length;c++){
-    const name = cols[c].toLowerCase();
+    const rawName = cols[c].trim();          // preserve original casing
+    const name = rawName.toLowerCase();      // lowercase only for prefix matching
     const v = row[c];
-    if (name === 't' || name === 'time' || name === 'timestamp') obj.t = v;
-    else if (name.startsWith('ai')) ai[Number(name.slice(2))] = v;
-    else if (name.startsWith('ao')) ao[Number(name.slice(2))] = v;
-    else if (name.startsWith('do')) dob[Number(name.slice(2))] = v;
-    else if (name.startsWith('tc')) tc[Number(name.slice(2))] = v;
+    const vn = (v === '' || v === undefined || v === null) ? null : Number(v);
+
+    if (name === 't' || name === 'time' || name === 'timestamp') {
+      obj.t = vn;
+    } else if (/^ai\d+$/.test(name)) {
+      ai[Number(name.slice(2))] = vn;
+    } else if (/^ao\d+$/.test(name)) {
+      ao[Number(name.slice(2))] = vn;
+    } else if (/^do\d+$/.test(name)) {
+      dob[Number(name.slice(2))] = vn;
+    } else if (/^tc\d+$/.test(name)) {
+      tc[Number(name.slice(2))] = vn;
+    } else if (/^expr\d+$/.test(name)) {
+      exprMap[Number(name.slice(4))] = vn;
+    } else if (/^pid\d+_/.test(name)) {
+      const m = name.match(/^pid(\d+)_(.+)$/);
+      if (m) {
+        const idx = Number(m[1]);
+        const field = m[2];
+        if (!pidMap[idx]) pidMap[idx] = { name: `PID${idx}` };
+        switch(field){
+          case 'pv':      pidMap[idx].pv = vn; break;
+          case 'sp':      pidMap[idx].target = vn; break;
+          case 'u':       pidMap[idx].u = vn; break;
+          case 'out':     pidMap[idx].out = vn; break;
+          case 'err':     pidMap[idx].err = vn; break;
+          case 'p':       pidMap[idx].p_term = vn; break;
+          case 'i':       pidMap[idx].i_term = vn; break;
+          case 'd':       pidMap[idx].d_term = vn; break;
+          case 'enabled': pidMap[idx].enabled = vn !== 0; break;
+        }
+      }
+    } else if (name.startsWith('gvar_')) {
+      globalVars[rawName.slice(5)] = vn;   // use rawName to preserve case
+    } else if (name.startsWith('bvar_')) {
+      buttonVars[rawName.slice(5)] = vn;   // use rawName: bvar_sparkON -> sparkON
+    } else if (name === 'chk_events') {
+      // JSON blob column — handled at parseCSV load time, not per-row
+    }
   }
-  if (ai.length) obj.ai = ai;
-  if (ao.length) obj.ao = ao;
+
+  if (ai.length)  obj.ai = ai;
+  if (ao.length)  obj.ao = ao;
   if (dob.length) obj.do = dob;
-  if (tc.length) obj.tc = tc;
+  if (tc.length)  obj.tc = tc;
+
+  // Reconstruct pid array in index order
+  const pidKeys = Object.keys(pidMap).map(Number).sort((a,b)=>a-b);
+  if (pidKeys.length) {
+    obj.pid = [];
+    for (const k of pidKeys) obj.pid[k] = pidMap[k];
+  }
+
+  // Reconstruct expr array – wrap scalar back into the dict shape widgets expect
+  const exprKeys = Object.keys(exprMap).map(Number).sort((a,b)=>a-b);
+  if (exprKeys.length) {
+    obj.expr = [];
+    for (const k of exprKeys)
+      obj.expr[k] = { output: exprMap[k], enabled: true, error: null };
+  }
+
+  if (Object.keys(globalVars).length) obj.global_vars = globalVars;
+  if (Object.keys(buttonVars).length) obj.button_vars = buttonVars;
+
   return obj;
 }
+
+// Called by replay loader when a chk_events column is found in the header
+// We only do this once (on the first non-empty value)
+window._checkEventsLoadedFromLog = false;
 
 function startReplay(cols, rows){
   // PAUSE live data
@@ -165,6 +245,14 @@ function loadAllReplayDataIntoCharts(){
           if (sel.kind === 'ao') return msg.ao?.[sel.index] ?? 0;
           if (sel.kind === 'do') return msg.do?.[sel.index] ?? 0;
           if (sel.kind === 'tc') return msg.tc?.[sel.index] ?? 0;
+          if (sel.kind === 'pid') {
+            const pid = msg.pid?.[sel.index];
+            if (!pid) return 0;
+            const prop = sel.prop || 'out';
+            return pid[prop] ?? 0;
+          }
+          if (sel.kind === 'expr') return msg.expr?.[sel.index]?.output ?? 0;
+          if (sel.kind === 'button') return msg.button_vars?.[sel.index] ?? 0;
           return 0;
         });
         buf.push({t, v: raw});
@@ -186,7 +274,10 @@ function updateGaugesAndBarsFromReplayIndex(){
   if (msg.do) state.do = msg.do;
   if (msg.tc) state.tc = msg.tc;
   if (msg.pid) state.pid = msg.pid;
+  if (msg.expr) state.expr = msg.expr;
   if (msg.motors) state.motors = msg.motors;
+  if (msg.global_vars) state.global_vars = msg.global_vars;
+  if (msg.button_vars) state.buttonVars = msg.button_vars;
 
   updateDOButtons();
 }
@@ -961,6 +1052,13 @@ function feedTick(msg){
   if (msg.le) state.le = msg.le;  // Logic Elements
   if (msg.math) state.math = msg.math;  // Math Operators
   if (msg.expr) state.expr = msg.expr;  // Expressions
+  // Server echoes button_vars back in every tick; keep state.buttonVars in sync
+  // so the logger settle-window frames contain the actual values
+  if (msg.button_vars && Object.keys(msg.button_vars).length) {
+    if (!state.buttonVars) state.buttonVars = {};
+    Object.assign(state.buttonVars, msg.button_vars);
+  }
+  if (msg.t) state.lastT = msg.t;
   onTick();
 }
 
@@ -971,6 +1069,17 @@ window.addEventListener('tick', (ev)=>{
 });
 
 /* ------------------------ boot / wiring --------------------------------- */
+/* -------------------- checklist event persistence --------------------- */
+window.addEventListener('checklist-check', (ev) => {
+  // POST to server so events get written into the current log session
+  const events = window.checkEvents || [];
+  fetch('/api/check_events', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ events })
+  }).catch(() => {}); // fire-and-forget; server may not be connected in replay mode
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   wireUI();
   ensureStarterPage();
@@ -982,6 +1091,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function wireUI(){
+
   $('#connectBtn')?.addEventListener('click', connect);
   $('#setRate')?.addEventListener('click', setRate);
   $('#fullscreenBtn')?.addEventListener('click', toggleFullscreen);
@@ -1774,7 +1884,17 @@ async function createSignalSelector(kind, currentIndex, onChange) {
 }
 
 function saveLayoutToFile() {
-  const blob = new Blob([JSON.stringify({pages: state.pages}, null, 2)], {type: 'application/json'});
+  // Also capture checklist dock position/visibility
+  const dock = document.getElementById('clDock');
+  const clState = dock ? {
+    visible: dock.style.display !== 'none',
+    left:    dock.style.left    || '',
+    top:     dock.style.top     || '',
+    width:   dock.style.width   || '',
+    height:  dock.style.height  || '',
+    transform: dock.style.transform || ''
+  } : null;
+  const blob = new Blob([JSON.stringify({pages: state.pages, checklistDock: clState}, null, 2)], {type: 'application/json'});
   const a = el('a', {href: URL.createObjectURL(blob), download: 'layout.json'});
   a.click();
 }
@@ -1792,6 +1912,19 @@ function loadLayoutFromFile() {
         state.pages = normalizeLayoutPages(obj.pages);   // <-- ensure defaults exist
         refreshPages();
         setActivePage(0);
+        // Restore checklist dock position/visibility
+        if (obj.checklistDock) {
+          const dock = document.getElementById('clDock');
+          if (dock) {
+            const cs = obj.checklistDock;
+            dock.style.display   = cs.visible ? 'flex' : 'none';
+            dock.style.left      = cs.left      || '';
+            dock.style.top       = cs.top       || '';
+            dock.style.width     = cs.width     || '';
+            dock.style.height    = cs.height    || '';
+            dock.style.transform = cs.transform || '';
+          }
+        }
       } catch (e) {
         alert('Load failed: ' + e.message);
       }
@@ -2537,6 +2670,26 @@ function mountChart(w, body){
           el('span',{className:'swatch', style:`background:${colorFor(si)}`},''), lab
         ]));
       });
+
+      // Check-event vertical lines (from checklist widget)
+      if (window.checkEvents && window.checkEvents.length) {
+        const evts = window.checkEvents.filter(ev => ev.t >= t0 && ev.t <= t1);
+        ctx.save();
+        ctx.strokeStyle = '#f5c842';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.font = 'bold 11px system-ui';
+        ctx.fillStyle = '#f5c842';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        for (const ev of evts) {
+          const ex = plotL + (ev.t - t0) * xscale;
+          if (ex < plotL || ex > plotR) continue;
+          ctx.beginPath(); ctx.moveTo(ex, plotT); ctx.lineTo(ex, plotB); ctx.stroke();
+          ctx.fillText(String(ev.label ?? ev.itemNum ?? ''), ex + 3, plotT + 2);
+        }
+        ctx.restore();
+      }
 
       // Cursor & popup
       const cur = chartCursor.get(w.id);
@@ -3432,14 +3585,17 @@ function mountDOButton(w, body){
 
 function updateDOButtons(){
   document.querySelectorAll('.do-btn').forEach(b=>{
-    if(!connected||!hwReady){ b.className='do-btn default'; return; }
     const id=b.closest('.widget').id.slice(2);
     const page=state.pages[activePageIndex];
     const w=page.widgets.find(x=>x.id===id);
     if(!w){ b.className='do-btn default'; return; }
-    
+
+    // Var-type buttons can show state from replay even when not connected
+    const isVar = w.opts.outputType === 'var';
+    if(!isVar && (!connected||!hwReady)){ b.className='do-btn default'; return; }
+
     let bit, active;
-    if (w.opts.outputType === 'var') {
+    if (isVar) {
       // Variables: simple logic, 1 = active (green), 0 = inactive (red)
       bit = state.buttonVars?.[w.opts.varName] || 0;
       active = !!bit;  // 1 = true = active

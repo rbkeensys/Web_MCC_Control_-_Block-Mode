@@ -31,6 +31,7 @@
       <button id="editExpr" class="btn">Expressions</button>
       <button id="exprHelp" class="btn" title="Expression Language Reference">❓ Expr Help</button>
       <button id="editScript" class="btn">Script</button>
+      <button id="clToggleBtn" class="btn" title="Open Checklist Editor">📋 CL Editor</button>
       <button id="saveLayout" class="btn">Save Layout</button>
       <button id="loadLayout" class="btn">Load Layout</button>
       <button id="openLogBtn" type="button" class="btn">Open Log</button>
@@ -94,6 +95,7 @@
       <button class="btn" data-add="le">Logic Element</button>
       <button class="btn" data-add="mathop">Math Operator</button>
       <button class="btn" data-add="expr">Expression</button>
+      <button class="btn" id="clOpenDockBtn" title="Open Checklist Widget">📋 Checklist</button>
       <h3>Pages</h3>
       <div id="pages"></div>
       <div class="page-controls">
@@ -105,6 +107,8 @@
   </main>
 
   <div id="modal" class="modal hidden"></div>
+  <script src="/checklist_widget.js" defer></script>
+  <script src="/checklist_editor.js" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>

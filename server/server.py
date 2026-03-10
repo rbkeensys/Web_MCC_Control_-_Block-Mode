@@ -2,7 +2,7 @@
 Version: 1.0.0
 Updated: 2026-01-14 23:30:56
 """
-__version__ = "2.0.8"  # Save sample rate to config
+__version__ = "2.0.9"  # Add checklist check_events endpoint
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -36,16 +36,29 @@ from app_models import LEFile, LogicElementCfg
 from expr_manager import ExpressionManager
 from expr_engine import global_vars as expr_global_vars
 import logging, os, math
-SERVER_VERSION = "2.0.8"  # Debug output + bug fixes  # Added PID execution rate, IF statements, Math outputs
-
+SERVER_VERSION = "2.0.9"  # Add checklist check_events endpoint
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
 MCC_DUMP_FIRST = int(os.environ.get("MCC_DUMP_FIRST", "5")) # dump first N ticks fully
 
-ROOT = Path(__file__).resolve().parent.parent
-CFG_DIR = ROOT/"server/config"
-WEB_DIR = ROOT/"web"
-LOGS_DIR = ROOT/"server"/"logs"
+# Detect if running as PyInstaller executable
+if getattr(sys, 'frozen', False):
+    # Running as compiled exe - use exe directory
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    # Running as Python script - use project root
+    ROOT = Path(__file__).resolve().parent.parent
+
+# Config/web/logs are in ROOT when frozen, ROOT/server when not
+if getattr(sys, 'frozen', False):
+    CFG_DIR = ROOT / "config"
+    WEB_DIR = ROOT / "web"
+    LOGS_DIR = ROOT / "logs"
+else:
+    CFG_DIR = ROOT / "server/config"
+    WEB_DIR = ROOT / "web"
+    LOGS_DIR = ROOT / "server" / "logs"
+
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # env toggles (all optional)
@@ -174,6 +187,29 @@ def _app_js():
 @app.get("/styles.css")
 def _styles_css():
     return FileResponse(str(WEB_DIR / "styles.css"))
+
+@app.get("/checklist_widget.js")
+def _checklist_widget():
+    return FileResponse(str(WEB_DIR / "checklist_widget.js"))
+
+@app.get("/api/default_checklist")
+def get_default_checklist():
+    """Try to serve checklist.txt from the working directory or web dir."""
+    from fastapi.responses import PlainTextResponse
+    import os
+    candidates = [
+        Path(os.getcwd()) / "checklist.txt",
+        WEB_DIR / "checklist.txt",
+        ROOT / "checklist.txt",
+    ]
+    for p in candidates:
+        if p.exists():
+            return PlainTextResponse(p.read_text(encoding="utf-8", errors="replace"))
+    return PlainTextResponse("", status_code=404)
+
+@app.get("/checklist_editor.js")
+def _checklist_editor():
+    return FileResponse(str(WEB_DIR / "checklist_editor.js"))
 
 @app.get("/EXPRESSION_REFERENCE.md")
 def _expression_reference():
@@ -774,6 +810,10 @@ async def acq_loop():
                 "le": clean_for_json(le_tel),
                 "math": clean_for_json(math_tel),
                 "expr": clean_for_json(expr_tel),
+                # Global/static variables from expression engine (static.name = ...)
+                "global_vars": clean_for_json(expr_global_vars.list_all()),
+                # buttonVars synchronized from the frontend
+                "button_vars": clean_for_json(dict(button_vars)),
             }
 
             ticks += 1
@@ -1277,6 +1317,19 @@ async def zero_ai_channels(req: dict):
 @app.get("/api/logs")
 def list_logs():
     return sorted([p.name for p in LOGS_DIR.glob("*") if p.is_dir()])
+
+@app.post("/api/check_events")
+async def post_check_events(req: Request):
+    """Receive checklist check events from frontend and write to current log."""
+    global session_logger
+    try:
+        data = await req.json()
+        events = data.get("events", [])
+        if session_logger and events:
+            session_logger.write_check_events(events)
+        return {"ok": True, "count": len(events)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @app.post("/api/logs/close")
 def close_log():
