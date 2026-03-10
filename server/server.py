@@ -2,7 +2,7 @@
 Version: 1.0.0
 Updated: 2026-01-14 23:30:56
 """
-__version__ = "2.0.9"  # Add checklist check_events endpoint
+__version__ = "2.1.0"  # Add checklist check_events endpoint
 __updated__ = "2026-01-14 23:30:56"
 
 
@@ -36,7 +36,7 @@ from app_models import LEFile, LogicElementCfg
 from expr_manager import ExpressionManager
 from expr_engine import global_vars as expr_global_vars
 import logging, os, math
-SERVER_VERSION = "2.0.9"  # Add checklist check_events endpoint
+SERVER_VERSION = "2.1.0"  # Add checklist check_events endpoint
 
 MCC_TICK_LOG = os.environ.get("MCC_TICK_LOG", "1") == "1"  # print 1 line per second
 MCC_DUMP_FIRST = int(os.environ.get("MCC_DUMP_FIRST", "5")) # dump first N ticks fully
@@ -857,6 +857,8 @@ async def acq_loop():
                     # Don't let formatting kill the loop
                     pass
 
+    except asyncio.CancelledError:
+        pass  # Normal shutdown — WebSocket client disconnected
     except Exception as e:
         print(f"[MCC-Hub] ACQUISITION LOOP ERROR: {e}")
         import traceback
@@ -1390,6 +1392,8 @@ async def ws(ws: WebSocket):
             run_task.cancel()
             try:
                 await run_task
+            except asyncio.CancelledError:
+                pass  # Expected — task was cancelled above
             except Exception as e:
                 print(f"[WS] task exit: {e}")
             run_task = None

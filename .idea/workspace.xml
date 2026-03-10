@@ -4,17 +4,11 @@
     <option name="autoReloadType" value="SELECTIVE" />
   </component>
   <component name="ChangeListManager">
-    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="Fixed script execution.  Fixed logic .vs. physical DO drive (NO/NC) which was broken.  Fixed saving sample rate from/to browser so it comes up with saved value.  Added buttonVar to scripts.  Fixed using buttonVar in expressions.  &#10;&#10;Major TODO: get acquisition speed up!">
+    <list default="true" id="6ee747c5-542f-43af-b33e-a97c54c29c34" name="Changes" comment="Added checklist widget, couple other minor fixes to rolling chart only version">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/miniDewarLayout.json" beforeDir="false" afterPath="$PROJECT_DIR$/miniDewarLayout.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server/config/PID.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/PID.json" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/config/config.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server/config/expressions.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/expressions.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server/config/script.json" beforeDir="false" afterPath="$PROJECT_DIR$/server/config/script.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/server/logger.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/logger.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/server/server.py" beforeDir="false" afterPath="$PROJECT_DIR$/server/server.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/web/app.js" beforeDir="false" afterPath="$PROJECT_DIR$/web/app.js" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/web/index.html" beforeDir="false" afterPath="$PROJECT_DIR$/web/index.html" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/web/styles.css" beforeDir="false" afterPath="$PROJECT_DIR$/web/styles.css" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
@@ -120,8 +114,8 @@
       <method v="2" />
     </configuration>
     <list>
-      <item itemvalue="Python.MCC Web App" />
       <item itemvalue="Python.server" />
+      <item itemvalue="Python.MCC Web App" />
     </list>
     <recent_temporary>
       <list>
@@ -381,7 +375,15 @@
       <option name="project" value="LOCAL" />
       <updated>1770221576022</updated>
     </task>
-    <option name="localTasksCounter" value="29" />
+    <task id="LOCAL-00029" summary="Added checklist widget, couple other minor fixes to rolling chart only version">
+      <option name="closed" value="true" />
+      <created>1773151261750</created>
+      <option name="number" value="00029" />
+      <option name="presentableId" value="LOCAL-00029" />
+      <option name="project" value="LOCAL" />
+      <updated>1773151261750</updated>
+    </task>
+    <option name="localTasksCounter" value="30" />
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
@@ -422,7 +424,8 @@
     <MESSAGE value="Multiple DAQ Boards and TC's working.  Many fixes to allow larger input lists.  Need to debug actual operation again" />
     <MESSAGE value="Fixing tare which should zero the channel, not just the gauge." />
     <MESSAGE value="Fixed script execution.  Fixed logic .vs. physical DO drive (NO/NC) which was broken.  Fixed saving sample rate from/to browser so it comes up with saved value.  Added buttonVar to scripts.  Fixed using buttonVar in expressions.  &#10;&#10;Major TODO: get acquisition speed up!" />
-    <option name="LAST_COMMIT_MESSAGE" value="Fixed script execution.  Fixed logic .vs. physical DO drive (NO/NC) which was broken.  Fixed saving sample rate from/to browser so it comes up with saved value.  Added buttonVar to scripts.  Fixed using buttonVar in expressions.  &#10;&#10;Major TODO: get acquisition speed up!" />
+    <MESSAGE value="Added checklist widget, couple other minor fixes to rolling chart only version" />
+    <option name="LAST_COMMIT_MESSAGE" value="Added checklist widget, couple other minor fixes to rolling chart only version" />
   </component>
   <component name="com.intellij.coverage.CoverageDataManagerImpl">
     <SUITE FILE_PATH="coverage/server_py$MCC_Web_App.coverage" NAME="MCC Web App Coverage Results" MODIFIED="1768338813910" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="false" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$/server" />

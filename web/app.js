@@ -255,7 +255,7 @@ function loadAllReplayDataIntoCharts(){
           if (sel.kind === 'button') return msg.button_vars?.[sel.index] ?? 0;
           return 0;
         });
-        buf.push({t, v: raw});
+        buf.push({t, tServer: t, v: raw});
         chartBuffers.set(w.id, buf);
       }
     }
@@ -728,11 +728,14 @@ async function executeScriptEvent(evt){
       if (!state.buttonVars) state.buttonVars = {};
       state.buttonVars[varName] = value;
       
-      // Sync to backend
+      // Sync to backend (sanitize: replace null/undefined with 0)
+      const _bvSend1 = Object.fromEntries(
+        Object.entries(state.buttonVars).map(([k,v]) => [k, (v == null || isNaN(Number(v))) ? 0 : Number(v)])
+      );
       const response = await fetch('/api/button_vars', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({vars: state.buttonVars})
+        body: JSON.stringify({vars: _bvSend1})
       });
       
       if (!response.ok) {
@@ -761,10 +764,13 @@ async function executeScriptEvent(evt){
           if (!state.buttonVars) state.buttonVars = {};
           state.buttonVars[varName] = 0;
           
+          const _bvSend2 = Object.fromEntries(
+            Object.entries(state.buttonVars).map(([k,v]) => [k, (v == null || isNaN(Number(v))) ? 0 : Number(v)])
+          );
           await fetch('/api/button_vars', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({vars: state.buttonVars})
+            body: JSON.stringify({vars: _bvSend2})
           });
           console.log(`[Script] ✓ buttonVar.${varName} duration reset complete`);
         }, duration * 1000);
@@ -2477,7 +2483,16 @@ function widgetOptions(w){
       pause.textContent=w.opts.paused?'Resume':'Pause';
     }}, w.opts.paused?'Resume':'Pause');
 
-    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause);
+    const resetZoom = el('button', {className:'btn', title:'Reset zoom / resume live'}, '↺ Reset');
+    resetZoom.onclick = () => {
+      w.view.span    = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
+      w.view.paused  = false;
+      w.view.tFreeze = 0;
+      w.opts.paused  = false;
+      w.opts.tFreeze = null;
+      pause.textContent = 'Pause';
+    };
+    opts.push(el('span',{},'Span[s]:'), span, el('span',{},'Filter[Hz]:'), filt, el('span',{},'Y Grid:'), yGrid, pause, resetZoom);
   }
   if (w.type==='bars'){
     const yGrid=el('input',{type:'number', value:w.opts.yGridLines||5, min:2, max:20, step:1, style:'width:60px'});
@@ -2493,6 +2508,22 @@ const chartBuffers=new Map();
 const chartFilters=new Map();
 const chartCursor=new Map(); // w.id -> {x: number|null, mode:'follow'|'current', ctxEl:HTMLElement|null}
 const chartRAFHandles=new Map(); // w.id -> {rafId: number, isRunning: boolean}
+
+/* ── Z-index focus manager ─────────────────────────────────────────────────
+   Any floating panel or modal calls bringToFront(el) on mousedown/click.
+   Base layer:  5000  (cl-dock default)
+   Modal layer: 10000 (settings, editors)
+   Ceiling:     never exceeds 29999 — resets to base+1 if needed.
+─────────────────────────────────────────────────────────────────────────── */
+let _zTop = 10000;
+function bringToFront(el) {
+  _zTop = (_zTop >= 29990) ? 10001 : _zTop + 1;
+  el.style.zIndex = _zTop;
+}
+// Wire any element so clicking anywhere on it brings it forward
+function makeRaiseable(el) {
+  el.addEventListener('mousedown', () => bringToFront(el), true);
+}
 
 /* ==================== ENHANCED CHART WITH GRID ==================== */
 /* ==================== FIXED CHART SPAN - LIVE UPDATE ==================== */
@@ -2532,17 +2563,28 @@ function mountChart(w, body){
       }
     } else {
       const base = (w.view.span || (window.GLOBAL_BUFFER_SPAN || 10));
-      w.view.span = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
-      w.opts.span = w.view.span; // Keep in sync
-      const buf = chartBuffers.get(w.id) || [];
-      w.view.paused = true;
-      w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
+      const newSpan = Math.max(0.1, Math.min(3600, base * ((ev.deltaY>0)?1.15:1/1.15)));
+      w.view.span = newSpan;
+      // Don't change opts.span — that's the "live" span, view.span is the zoom span
+      const nativeSpan = w.opts.span || window.GLOBAL_BUFFER_SPAN || 10;
+      if (newSpan >= nativeSpan * 0.99) {
+        // Zoomed back out to native span — resume live following
+        w.view.paused = false;
+        w.view.tFreeze = 0;
+        w.view.span = nativeSpan;
+      } else {
+        // Zooming in — freeze the view
+        const buf = chartBuffers.get(w.id) || [];
+        w.view.paused = true;
+        w.view.tFreeze = buf.length ? buf[buf.length-1].t : performance.now()/1000;
+      }
     }
   }, {passive:false});
 
   canvas.addEventListener('dblclick', ()=>{
-    w.view.span = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
-    w.view.paused = false;
+    w.view.span    = w.opts.span || (window.GLOBAL_BUFFER_SPAN || 10);
+    w.view.paused  = false;
+    w.view.tFreeze = 0;
   });
 
   chartCursor.set(w.id, {x:null, mode:w.opts.cursorMode||'follow', ctxEl:null});
@@ -2562,6 +2604,7 @@ function mountChart(w, body){
     if (cur.ctxEl && cur.ctxEl.parentNode) cur.ctxEl.parentNode.removeChild(cur.ctxEl);
     const menu=buildChartContextMenu(w, canvas, legend);
     document.body.append(menu); menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px';
+    bringToFront(menu);
     cur.ctxEl=menu; chartCursor.set(w.id,cur);
   });
 
@@ -2583,13 +2626,15 @@ function mountChart(w, body){
         : (w.opts.span || window.GLOBAL_BUFFER_SPAN || 10);
 
       // Handle both zoom pause (w.view.paused) and button pause (w.opts.paused)
+      const lastBufT = buf[buf.length-1].t;
       let t1;
       if (w.view.paused) {
-        t1 = w.view.tFreeze || buf[buf.length-1].t;
+        // Clamp tFreeze to last available data (handles log reload)
+        t1 = Math.min(w.view.tFreeze || lastBufT, lastBufT);
       } else if (w.opts.paused && w.opts.tFreeze !== null && w.opts.tFreeze !== undefined) {
-        t1 = w.opts.tFreeze;
+        t1 = Math.min(w.opts.tFreeze, lastBufT);
       } else {
-        t1 = buf[buf.length-1].t;
+        t1 = lastBufT;
       }
       const t0 = t1 - viewSpan;
       const viewBuf = buf.filter(b => b.t >= t0);
@@ -2673,7 +2718,19 @@ function mountChart(w, body){
 
       // Check-event vertical lines (from checklist widget)
       if (window.checkEvents && window.checkEvents.length) {
-        const evts = window.checkEvents.filter(ev => ev.t >= t0 && ev.t <= t1);
+        // In replay mode, buf entries use t = Unix epoch (msg.t from CSV).
+        // In live mode,   buf entries use t = performance.now()/1000.
+        // Check events store tServer = Unix epoch always.
+        // We map each event to chart-x by finding the buf entry whose tServer
+        // is closest — tServer==t in replay, and is tagged separately in live.
+        //
+        // For animated playback: only show events whose tServer <= last buf entry's tServer
+        // so they "pop up" as playback progresses.
+        const lastBuf = buf[buf.length - 1];
+        const lastServer = lastBuf ? (lastBuf.tServer ?? lastBuf.t) : Infinity;
+        const firstBuf = buf[0];
+        const firstServer = firstBuf ? (firstBuf.tServer ?? firstBuf.t) : -Infinity;
+
         ctx.save();
         ctx.strokeStyle = '#f5c842';
         ctx.lineWidth = 1.5;
@@ -2682,9 +2739,31 @@ function mountChart(w, body){
         ctx.fillStyle = '#f5c842';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
-        for (const ev of evts) {
-          const ex = plotL + (ev.t - t0) * xscale;
+
+        for (const ev of window.checkEvents) {
+          const evS = ev.tServer ?? ev.t;
+
+          // Don't show events beyond current playback position
+          if (evS > lastServer) continue;
+          // Don't show events before the buffer starts (scrolled off left)
+          if (evS < firstServer) continue;
+
+          // Find the viewBuf entry whose tServer is closest to evS
+          // viewBuf is already filtered to [t0..t1] in chart-t space
+          // but the event may be in range even if not in viewBuf slice —
+          // compute chart-x directly from tServer ratio across the full buf.
+          // Find closest buf entry (full buf, not just viewBuf) to get the chart-t.
+          let bestT  = null;
+          let bestDiff = Infinity;
+          for (const b of buf) {
+            const bs = b.tServer ?? b.t;
+            const diff = Math.abs(bs - evS);
+            if (diff < bestDiff) { bestDiff = diff; bestT = b.t; }
+          }
+          if (bestT === null) continue;
+          const ex = plotL + (bestT - t0) * xscale;
           if (ex < plotL || ex > plotR) continue;
+
           ctx.beginPath(); ctx.moveTo(ex, plotT); ctx.lineTo(ex, plotB); ctx.stroke();
           ctx.fillText(String(ev.label ?? ev.itemNum ?? ''), ex + 3, plotT + 2);
         }
@@ -2881,8 +2960,10 @@ function buildChartContextMenu(w, canvas, legend){
     }
   });
 
-  // Make it draggable by the header
+  // Make it draggable by the header; raise to front on any click
   makeDraggable(menu, header);
+  menu.addEventListener('mousedown', () => bringToFront(menu), { capture: true });
+  bringToFront(menu);  // Raise immediately on creation
 
   return menu;
 }
@@ -2897,6 +2978,7 @@ function makeDraggable(element, handle){
   handle.addEventListener('mousedown', (e)=>{
     // Don't drag if clicking on close button or inputs
     if (e.target.tagName === 'BUTTON' || e.target.tagName === 'INPUT') return;
+    bringToFront(element);  // Raise to front when drag starts
 
     isDragging = true;
     startX = e.clientX;
@@ -3069,11 +3151,12 @@ function updateChartBuffers(){
         cf._t=t;
         chartFilters.set(w.id, cf);
       }
-      buf.push({t, v: filtered});
+      buf.push({t, tServer: (typeof state !== 'undefined' && state.lastT) || t, v: filtered});
 
-      // KEY FIX: Use the chart's own span setting (with some buffer margin)
+      // Keep enough history for both live span AND any active zoom-out view
       const chartSpan = Math.max(1, w.opts.span || 10);
-      const bufferDepth = chartSpan * 1.2; // Keep 20% extra for smooth scrolling
+      const viewSpanNow = (w.view && w.view.span) ? w.view.span : chartSpan;
+      const bufferDepth = Math.max(chartSpan, viewSpanNow) * 1.5;
 
       // Remove old data beyond the buffer depth
       while (buf.length && (t - buf[0].t) > bufferDepth) {
@@ -3467,10 +3550,13 @@ function mountDOButton(w, body){
       
       // Sync to backend for expressions
       try {
+        const _bvSend3 = Object.fromEntries(
+          Object.entries(state.buttonVars).map(([k,v]) => [k, (v == null || isNaN(Number(v))) ? 0 : Number(v)])
+        );
         await fetch('/api/button_vars', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({vars: state.buttonVars})
+          body: JSON.stringify({vars: _bvSend3})
         });
       } catch(e) { console.warn('ButtonVars sync failed', e); }
     } else {
@@ -3642,6 +3728,7 @@ function mountPIDPanel(w, body){
       if (detailsDiv) {
         if (detailsDiv.style.display === 'none') {
           detailsDiv.style.display = 'block';
+          bringToFront(detailsDiv);
           // Position near the widget
           const widgetEl = document.getElementById('w_' + w.id);
           if (widgetEl) {
@@ -3702,8 +3789,9 @@ function mountPIDPanel(w, body){
     isDragging = false;
   });
   
-  // Append to body (not to widget)
+  // Append to body (not to widget); raise to front on any click
   document.body.append(detailsPanel);
+  detailsPanel.addEventListener('mousedown', () => bringToFront(detailsPanel), { capture: true });
   
   // Enable indicator container (will be populated if gating is configured)
   const enableContainer = el('div', {style:'display:inline-block;margin-left:8px;vertical-align:middle'});
@@ -4769,6 +4857,8 @@ function readSelection(sel){
 
 // drag/resize — block drag when interacting with inputs
 function makeDragResize(node, w, header, handle){
+  // Bring widget to front when clicked
+  node.addEventListener('mousedown', () => bringToFront(node), { capture: true });
   let dragging=false,resizing=false,sx=0,sy=0,ox=0,oy=0,ow=0,oh=0;
   
   // Set minimum sizes based on widget type
@@ -4879,6 +4969,8 @@ function showModal(content, onClose){
   const closeBtn=el('button',{className:'btn',onclick:()=>{ closeModal(onClose); }},'Close');
   const close=el('div',{style:'text-align:right;margin-bottom:8px;'}, closeBtn);
   panel.append(close,content); m.append(panel);
+  bringToFront(m);
+  m.addEventListener('mousedown', () => bringToFront(m), { capture: true, once: false });
 }
 
 function closeModal(onClose){
